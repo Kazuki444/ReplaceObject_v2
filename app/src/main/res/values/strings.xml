@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">ReplaceObject_v2</string>
+
+    <!-- activity_select_item.xml -->
+    <string name="item_list_title">Replace Item List</string>
+    <string name="select_item_title">Select Items</string>
+    <string name="start_button_name">Start</string>
+</resources>
