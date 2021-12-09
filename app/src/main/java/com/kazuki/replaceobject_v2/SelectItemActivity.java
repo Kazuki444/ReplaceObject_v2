@@ -2,6 +2,7 @@ package com.kazuki.replaceobject_v2;
 
 import androidx.appcompat.app.AppCompatActivity;
 
+import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.util.Log;
@@ -10,7 +11,10 @@ import android.widget.CheckBox;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.Arrays;
 
@@ -32,7 +36,7 @@ public class SelectItemActivity extends AppCompatActivity {
 
     // read label map
     try {
-      labels = AssetFileReader.readLabelmapFileFromAssets(this, LABELMAP_NAME);
+      labels = readLabelmapFileFromAssets(this, LABELMAP_NAME);
     } catch (IOException e) {
       Log.e(TAG, "Failed to read an asset file", e);
     }
@@ -73,11 +77,23 @@ public class SelectItemActivity extends AppCompatActivity {
   private String updateSelectItemsTextView(ArrayList<String> array) {
     StringBuilder sb = new StringBuilder();
     array.forEach(item -> {
-      sb.append("・");
-      sb.append(item);
-      sb.append("\n");
+      sb.append("・").append(item).append("\n");
     });
     return sb.toString();
+  }
+
+  private static String[] readLabelmapFileFromAssets(Context context, String filename) throws IOException {
+    try (InputStream inputStream = context.getAssets().open(filename);
+         BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
+      ArrayList<String> labels = new ArrayList<>();
+      String line;
+      while ((line = reader.readLine()) != null) {
+        if (line.equals("???")) continue;
+        labels.add(line);
+      }
+      return labels.toArray(new String[labels.size()]);
+    }
+
   }
 
 }

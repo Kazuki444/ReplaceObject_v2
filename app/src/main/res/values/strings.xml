@@ -5,4 +5,7 @@
     <string name="item_list_title">Replace Item List</string>
     <string name="select_item_title">Select Items</string>
     <string name="start_button_name">Start</string>
+
+    <!-- activity_replace_object.xml -->
+    <string name="show_depth_switch_name">Depth Map</string>
 </resources>
