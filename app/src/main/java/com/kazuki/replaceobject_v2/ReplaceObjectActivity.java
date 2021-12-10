@@ -46,7 +46,9 @@ import com.kazuki.replaceobject_v2.myrender.VirtualObjectRenderer;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Replace a real object with a virtual object of the same class as the real object.
@@ -89,7 +91,7 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
   private boolean hasSetTextureNames = false;
 
   // Virtual object
-  private final ArrayList<VirtualObjectRenderer> virtualObjectRenderers = new ArrayList<>();
+  private final Map<String, VirtualObjectRenderer> virtualObjectRenderers = new HashMap<>();
   private final ArrayList<Anchor> anchors = new ArrayList<>();
 
   // Temporary matrix allocated here to reduce number of allocations for each frame.
@@ -133,9 +135,9 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
     // get select items
     Intent intent = getIntent();
     selectItems = intent.getStringArrayExtra(SelectItemActivity.EXTRA_SELECT_ITEMS);
-    try{
+    try {
       modelTableHelper = new ModelTableHelper(this, MODEL_TABLE);
-    } catch (IOException e){
+    } catch (IOException e) {
       Log.e(TAG, "Failed to read a required asset file", e);
     }
 
@@ -251,15 +253,15 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
     try {
       backgroundRenderer = new BackgroundRenderer(render);
       virtualSceneFramebuffer = new Framebuffer(render, /*width=*/ 1, /*height=*/ 1);
-      for (String key : selectItems){
+      for (String key : selectItems) {
         String[] fileNames = modelTableHelper.getFileName(key);
-        if (fileNames != null){
+        if (fileNames != null) {
           VirtualObjectRenderer virtualObjectRenderer = new VirtualObjectRenderer(
                   render,
                   MODEL_FILE_PATH + fileNames[0],
                   MODEL_FILE_PATH + fileNames[1],
                   MODEL_FILE_PATH + fileNames[2]);
-          virtualObjectRenderers.add(virtualObjectRenderer);
+          virtualObjectRenderers.put(key, virtualObjectRenderer);
         }
       }
     } catch (IOException e) {
@@ -356,11 +358,10 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
     getLightEstimation(lightEstimate, viewMatrix);
 
     // update lighting parameter in the shader
-    for (VirtualObjectRenderer virtualObjectRenderer : virtualObjectRenderers){
-      virtualObjectRenderer.updateLightEstimation(
-              lightEstimate, viewInverseMatrix, viewLightDirection,
-              lightIntensity, sphericalHarmonicsCoefficients);
-    }
+    virtualObjectRenderers.forEach((className, virtualObjectRenderer) ->
+            virtualObjectRenderer.updateLightEstimation(
+                    lightEstimate, viewInverseMatrix, viewLightDirection,
+                    lightIntensity, sphericalHarmonicsCoefficients));
 
     // Visualize anchors created by touch.
     render.clear(virtualSceneFramebuffer, 0f, 0f, 0f, 0f);
@@ -378,12 +379,11 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
       Matrix.multiplyMM(modelViewProjectionMatrix, 0, projectionMatrix, 0, modelViewMatrix, 0);
 
       // Update shader properties and draw
-      for (VirtualObjectRenderer virtualObjectRenderer : virtualObjectRenderers){
+      virtualObjectRenderers.forEach((className, virtualObjectRenderer) -> {
         virtualObjectRenderer.updateModelView(modelViewMatrix, modelViewProjectionMatrix);
         render.draw(virtualObjectRenderer.getVirtualObjectMesh(),
-                virtualObjectRenderer.getVirtualObjectShader(),
-                virtualSceneFramebuffer);
-      }
+                virtualObjectRenderer.getVirtualObjectShader(), virtualSceneFramebuffer);
+      });
 
     }
 
