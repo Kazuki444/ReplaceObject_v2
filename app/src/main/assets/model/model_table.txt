@@ -1,0 +1,80 @@
+person:cube.obj:cube_albedo.png:cube_pbr.png
+bicycle:cube.obj:cube_albedo.png:cube_pbr.png
+car:cube.obj:cube_albedo.png:cube_pbr.png
+motorcycle:cube.obj:cube_albedo.png:cube_pbr.png
+airplane:cube.obj:cube_albedo.png:cube_pbr.png
+bus:cube.obj:cube_albedo.png:cube_pbr.png
+train:cube.obj:cube_albedo.png:cube_pbr.png
+truck:cube.obj:cube_albedo.png:cube_pbr.png
+boat:cube.obj:cube_albedo.png:cube_pbr.png
+traffic light:cube.obj:cube_albedo.png:cube_pbr.png
+fire hydrant:cube.obj:cube_albedo.png:cube_pbr.png
+stop sign:cube.obj:cube_albedo.png:cube_pbr.png
+parking meter:cube.obj:cube_albedo.png:cube_pbr.png
+bench:cube.obj:cube_albedo.png:cube_pbr.png
+bird:cube.obj:cube_albedo.png:cube_pbr.png
+cat:cube.obj:cube_albedo.png:cube_pbr.png
+dog:cube.obj:cube_albedo.png:cube_pbr.png
+horse:cube.obj:cube_albedo.png:cube_pbr.png
+sheep:cube.obj:cube_albedo.png:cube_pbr.png
+cow:cube.obj:cube_albedo.png:cube_pbr.png
+elephant:cube.obj:cube_albedo.png:cube_pbr.png
+bear:cube.obj:cube_albedo.png:cube_pbr.png
+zebra:cube.obj:cube_albedo.png:cube_pbr.png
+giraffe:cube.obj:cube_albedo.png:cube_pbr.png
+backpack:cube.obj:cube_albedo.png:cube_pbr.png
+umbrella:cube.obj:cube_albedo.png:cube_pbr.png
+handbag:cube.obj:cube_albedo.png:cube_pbr.png
+tie:cube.obj:cube_albedo.png:cube_pbr.png
+suitcase:cube.obj:cube_albedo.png:cube_pbr.png
+frisbee:cube.obj:cube_albedo.png:cube_pbr.png
+skis:cube.obj:cube_albedo.png:cube_pbr.png
+snowboard:cube.obj:cube_albedo.png:cube_pbr.png
+sports ball:cube.obj:cube_albedo.png:cube_pbr.png
+kite:cube.obj:cube_albedo.png:cube_pbr.png
+baseball bat:cube.obj:cube_albedo.png:cube_pbr.png
+baseball glove:cube.obj:cube_albedo.png:cube_pbr.png
+skateboard:cube.obj:cube_albedo.png:cube_pbr.png
+surfboard:cube.obj:cube_albedo.png:cube_pbr.png
+tennis racket:cube.obj:cube_albedo.png:cube_pbr.png
+bottle:cube.obj:cube_albedo.png:cube_pbr.png
+wine glass:cube.obj:cube_albedo.png:cube_pbr.png
+cup:cube.obj:cube_albedo.png:cube_pbr.png
+fork:cube.obj:cube_albedo.png:cube_pbr.png
+knife:cube.obj:cube_albedo.png:cube_pbr.png
+spoon:cube.obj:cube_albedo.png:cube_pbr.png
+bowl:cube.obj:cube_albedo.png:cube_pbr.png
+banana:cube.obj:cube_albedo.png:cube_pbr.png
+apple:cube.obj:cube_albedo.png:cube_pbr.png
+sandwich:cube.obj:cube_albedo.png:cube_pbr.png
+orange:cube.obj:cube_albedo.png:cube_pbr.png
+broccoli:cube.obj:cube_albedo.png:cube_pbr.png
+carrot:cube.obj:cube_albedo.png:cube_pbr.png
+hot dog:cube.obj:cube_albedo.png:cube_pbr.png
+pizza:cube.obj:cube_albedo.png:cube_pbr.png
+donut:cube.obj:cube_albedo.png:cube_pbr.png
+cake:cube.obj:cube_albedo.png:cube_pbr.png
+chair:cube.obj:cube_albedo.png:cube_pbr.png
+couch:cube.obj:cube_albedo.png:cube_pbr.png
+potted plant:cube.obj:cube_albedo.png:cube_pbr.png
+bed:cube.obj:cube_albedo.png:cube_pbr.png
+dining table:cube.obj:cube_albedo.png:cube_pbr.png
+toilet:cube.obj:cube_albedo.png:cube_pbr.png
+tv:cube.obj:cube_albedo.png:cube_pbr.png
+laptop:cube.obj:cube_albedo.png:cube_pbr.png
+mouse:cube.obj:cube_albedo.png:cube_pbr.png
+remote:cube.obj:cube_albedo.png:cube_pbr.png
+keyboard:cube.obj:cube_albedo.png:cube_pbr.png
+cell phone:cube.obj:cube_albedo.png:cube_pbr.png
+microwave:cube.obj:cube_albedo.png:cube_pbr.png
+oven:cube.obj:cube_albedo.png:cube_pbr.png
+toaster:cube.obj:cube_albedo.png:cube_pbr.png
+sink:cube.obj:cube_albedo.png:cube_pbr.png
+refrigerator:cube.obj:cube_albedo.png:cube_pbr.png
+book:cube.obj:cube_albedo.png:cube_pbr.png
+clock:cube.obj:cube_albedo.png:cube_pbr.png
+vase:cube.obj:cube_albedo.png:cube_pbr.png
+scissors:cube.obj:cube_albedo.png:cube_pbr.png
+teddy bear:cube.obj:cube_albedo.png:cube_pbr.png
+hair drier:cube.obj:cube_albedo.png:cube_pbr.png
+toothbrush:cube.obj:cube_albedo.png:cube_pbr.png

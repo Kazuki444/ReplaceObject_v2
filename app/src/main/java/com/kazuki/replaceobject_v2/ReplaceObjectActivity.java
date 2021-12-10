@@ -36,6 +36,7 @@ import com.google.ar.core.exceptions.UnavailableUserDeclinedInstallationExceptio
 import com.kazuki.replaceobject_v2.helper.CameraPermissionHelper;
 import com.kazuki.replaceobject_v2.helper.DisplayRotationHelper;
 import com.kazuki.replaceobject_v2.helper.FullScreenHelper;
+import com.kazuki.replaceobject_v2.helper.ModelTableHelper;
 import com.kazuki.replaceobject_v2.helper.TapHelper;
 import com.kazuki.replaceobject_v2.helper.TrackingStateHelper;
 import com.kazuki.replaceobject_v2.myrender.BackgroundRenderer;
@@ -52,6 +53,9 @@ import java.util.List;
  */
 public class ReplaceObjectActivity extends AppCompatActivity implements MyRender.Renderer {
   private static final String TAG = ReplaceObjectActivity.class.getSimpleName();
+
+  private static final String MODEL_FILE_PATH = "model/";
+  private static final String MODEL_TABLE = MODEL_FILE_PATH + "model_table.txt";
 
   private static final float Z_NEAR = 0.1f;
   private static final float Z_FAR = 100f;
@@ -85,7 +89,7 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
   private boolean hasSetTextureNames = false;
 
   // Virtual object
-  private VirtualObjectRenderer virtualObjectRenderer;
+  private final ArrayList<VirtualObjectRenderer> virtualObjectRenderers = new ArrayList<>();
   private final ArrayList<Anchor> anchors = new ArrayList<>();
 
   // Temporary matrix allocated here to reduce number of allocations for each frame.
@@ -102,7 +106,7 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
 
   // from SelectItemActivity
   private String[] selectItems;
-  private String selectItem;
+  private ModelTableHelper modelTableHelper;
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -129,7 +133,12 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
     // get select items
     Intent intent = getIntent();
     selectItems = intent.getStringArrayExtra(SelectItemActivity.EXTRA_SELECT_ITEMS);
-    selectItem = selectItems[0];
+    try{
+      modelTableHelper = new ModelTableHelper(this, MODEL_TABLE);
+    } catch (IOException e){
+      Log.e(TAG, "Failed to read a required asset file", e);
+    }
+
   }
 
   @Override
@@ -219,7 +228,6 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
   public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
     super.onRequestPermissionsResult(requestCode, permissions, grantResults);
     if (!CameraPermissionHelper.hasCameraPermission(this)) {
-      // Use toast instead of snackbar here since the activity will exit.
       Toast.makeText(this, "Camera permission is needed to run this application", Toast.LENGTH_LONG)
               .show();
       if (!CameraPermissionHelper.shouldShowRequestPermissionRationale(this)) {
@@ -243,11 +251,17 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
     try {
       backgroundRenderer = new BackgroundRenderer(render);
       virtualSceneFramebuffer = new Framebuffer(render, /*width=*/ 1, /*height=*/ 1);
-      virtualObjectRenderer = new VirtualObjectRenderer(
-              render,
-              "model/cube.obj",
-              "model/cube_albedo.png",
-              "model/cube_pbr.png");
+      for (String key : selectItems){
+        String[] fileNames = modelTableHelper.getFileName(key);
+        if (fileNames != null){
+          VirtualObjectRenderer virtualObjectRenderer = new VirtualObjectRenderer(
+                  render,
+                  MODEL_FILE_PATH + fileNames[0],
+                  MODEL_FILE_PATH + fileNames[1],
+                  MODEL_FILE_PATH + fileNames[2]);
+          virtualObjectRenderers.add(virtualObjectRenderer);
+        }
+      }
     } catch (IOException e) {
       Log.e(TAG, "Failed to read a required asset file", e);
     }
@@ -342,9 +356,11 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
     getLightEstimation(lightEstimate, viewMatrix);
 
     // update lighting parameter in the shader
-    virtualObjectRenderer.updateLightEstimation(
-            lightEstimate, viewInverseMatrix, viewLightDirection,
-            lightIntensity, sphericalHarmonicsCoefficients);
+    for (VirtualObjectRenderer virtualObjectRenderer : virtualObjectRenderers){
+      virtualObjectRenderer.updateLightEstimation(
+              lightEstimate, viewInverseMatrix, viewLightDirection,
+              lightIntensity, sphericalHarmonicsCoefficients);
+    }
 
     // Visualize anchors created by touch.
     render.clear(virtualSceneFramebuffer, 0f, 0f, 0f, 0f);
@@ -362,10 +378,13 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
       Matrix.multiplyMM(modelViewProjectionMatrix, 0, projectionMatrix, 0, modelViewMatrix, 0);
 
       // Update shader properties and draw
-      virtualObjectRenderer.updateModelView(modelViewMatrix, modelViewProjectionMatrix);
-      render.draw(virtualObjectRenderer.getVirtualObjectMesh(),
-              virtualObjectRenderer.getVirtualObjectShader(),
-              virtualSceneFramebuffer);
+      for (VirtualObjectRenderer virtualObjectRenderer : virtualObjectRenderers){
+        virtualObjectRenderer.updateModelView(modelViewMatrix, modelViewProjectionMatrix);
+        render.draw(virtualObjectRenderer.getVirtualObjectMesh(),
+                virtualObjectRenderer.getVirtualObjectShader(),
+                virtualSceneFramebuffer);
+      }
+
     }
 
     // Compose the virtual scene with the background.
