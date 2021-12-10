@@ -21,7 +21,7 @@ public class VirtualObjectRenderer {
    */
   public VirtualObjectRenderer(
           MyRender render, String objectFileName, String albedoTextureFileName, String pbrTextureFileName)
-          throws IOException{
+          throws IOException {
     virtualObjectMesh = Mesh.createFromAsset(render, objectFileName);
     virtualObjectAlbedoTexture =
             Texture.createFromAsset(
@@ -48,8 +48,8 @@ public class VirtualObjectRenderer {
 
   // Update shader uniform about light.
   public void updateLightEstimation(
-          LightEstimate lightEstimate ,float[] viewInverseMatrix,
-          float[] viewLightDirection, float[] intensity, float[] sphericalHarmonicsCoefficients){
+          LightEstimate lightEstimate, float[] viewInverseMatrix,
+          float[] viewLightDirection, float[] intensity, float[] sphericalHarmonicsCoefficients) {
     if (lightEstimate.getState() != LightEstimate.State.VALID) {
       virtualObjectShader.setBool("u_LightEstimateIsValid", false);
       return;
@@ -63,7 +63,7 @@ public class VirtualObjectRenderer {
   }
 
   // Update shader uniform about model view.
-  public void updateModelView(float[] modelViewMatrix, float[] modelViewProjectionMatrix){
+  public void updateModelView(float[] modelViewMatrix, float[] modelViewProjectionMatrix) {
     virtualObjectShader.setMat4("u_ModelView", modelViewMatrix);
     virtualObjectShader.setMat4("u_ModelViewProjection", modelViewProjectionMatrix);
   }
