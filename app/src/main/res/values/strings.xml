@@ -8,4 +8,5 @@
 
     <!-- activity_replace_object.xml -->
     <string name="show_depth_switch_name">Depth Map</string>
+    <string name="inpaint_switch_name">Inpaint</string>
 </resources>
