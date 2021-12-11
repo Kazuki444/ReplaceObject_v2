@@ -46,7 +46,7 @@ public final class ModelTableHelper {
 
   /**
    * Return the file names of the class.
-   * @return file names String[3]. if map don't have the key, return null.
+   * @return if the map has key, file names String[3]. Otherwise null if map don't have the key.
    */
   public String[] getFileName(String key){
     return table.get(key);

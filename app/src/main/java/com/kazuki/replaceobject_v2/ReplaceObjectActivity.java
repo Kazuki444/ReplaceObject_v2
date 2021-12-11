@@ -10,6 +10,7 @@ import android.opengl.Matrix;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.MotionEvent;
+import android.view.View;
 import android.widget.Switch;
 import android.widget.Toast;
 
@@ -37,7 +38,7 @@ import com.kazuki.replaceobject_v2.helper.CameraPermissionHelper;
 import com.kazuki.replaceobject_v2.helper.DisplayRotationHelper;
 import com.kazuki.replaceobject_v2.helper.FullScreenHelper;
 import com.kazuki.replaceobject_v2.helper.ModelTableHelper;
-import com.kazuki.replaceobject_v2.helper.TapHelper;
+import com.kazuki.replaceobject_v2.helper.GestureHelper;
 import com.kazuki.replaceobject_v2.helper.TrackingStateHelper;
 import com.kazuki.replaceobject_v2.myrender.BackgroundRenderer;
 import com.kazuki.replaceobject_v2.myrender.Framebuffer;
@@ -74,13 +75,18 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
           -0.273137f,
           0.136569f,
   };
+
   private GLSurfaceView surfaceView;
+
+  // UI
   private Switch showDepthMapSwitch;
+  private Switch inpaintSwitch;
+  private final ArrayList<View> ui = new ArrayList<>();
 
   private boolean installRequested;
 
   private Session session;
-  private TapHelper tapHelper;
+  private GestureHelper gestureHelper;
   private DisplayRotationHelper displayRotationHelper;
   private final TrackingStateHelper trackingStateHelper = new TrackingStateHelper(this);
   private MyRender render;
@@ -117,10 +123,13 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
     surfaceView = findViewById(R.id.surfaceview);
     displayRotationHelper = new DisplayRotationHelper(/*context=*/ this);
     showDepthMapSwitch = findViewById(R.id.switch_showDepthMap);
+    inpaintSwitch = findViewById(R.id.switch_inpaint);
 
     // set up touch listener
-    tapHelper = new TapHelper(this);
-    surfaceView.setOnTouchListener(tapHelper);
+    ui.add(showDepthMapSwitch);
+    ui.add(inpaintSwitch);
+    gestureHelper = new GestureHelper(this, this, ui);
+    surfaceView.setOnTouchListener(gestureHelper);
 
     // set up switch
     showDepthMapSwitch.setOnCheckedChangeListener((compoundButton, isChecked) -> {
@@ -411,7 +420,7 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
 
   // Handle only one tap per frame, as taps are usually low frequency compared to frame rate.
   private void handleTap(Frame frame, Camera camera) {
-    MotionEvent tap = tapHelper.poll();
+    MotionEvent tap = gestureHelper.poll();
     if (tap != null && camera.getTrackingState() == TrackingState.TRACKING) {
       List<HitResult> hitResultList;
       hitResultList = frame.hitTest(tap);
