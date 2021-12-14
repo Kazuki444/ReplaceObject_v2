@@ -1,9 +1,11 @@
 package com.kazuki.replaceobject_v2;
 
-import androidx.annotation.NonNull;
-import androidx.appcompat.app.AppCompatActivity;
-
 import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.RectF;
 import android.media.Image;
 import android.opengl.GLSurfaceView;
 import android.opengl.Matrix;
@@ -14,6 +16,9 @@ import android.view.View;
 import android.widget.Switch;
 import android.widget.Toast;
 
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.AppCompatActivity;
+
 import com.google.ar.core.Anchor;
 import com.google.ar.core.ArCoreApk;
 import com.google.ar.core.Camera;
@@ -21,6 +26,7 @@ import com.google.ar.core.Config;
 import com.google.ar.core.DepthPoint;
 import com.google.ar.core.Frame;
 import com.google.ar.core.HitResult;
+import com.google.ar.core.ImageFormat;
 import com.google.ar.core.LightEstimate;
 import com.google.ar.core.Plane;
 import com.google.ar.core.Point;
@@ -37,15 +43,23 @@ import com.google.ar.core.exceptions.UnavailableUserDeclinedInstallationExceptio
 import com.kazuki.replaceobject_v2.helper.CameraPermissionHelper;
 import com.kazuki.replaceobject_v2.helper.DisplayRotationHelper;
 import com.kazuki.replaceobject_v2.helper.FullScreenHelper;
-import com.kazuki.replaceobject_v2.helper.ModelTableHelper;
 import com.kazuki.replaceobject_v2.helper.GestureHelper;
+import com.kazuki.replaceobject_v2.helper.ModelTableHelper;
 import com.kazuki.replaceobject_v2.helper.TrackingStateHelper;
 import com.kazuki.replaceobject_v2.myrender.BackgroundRenderer;
 import com.kazuki.replaceobject_v2.myrender.Framebuffer;
 import com.kazuki.replaceobject_v2.myrender.MyRender;
 import com.kazuki.replaceobject_v2.myrender.VirtualObjectRenderer;
 
+import org.tensorflow.lite.DataType;
+import org.tensorflow.lite.support.image.TensorImage;
+import org.tensorflow.lite.task.core.BaseOptions;
+import org.tensorflow.lite.task.core.vision.ImageProcessingOptions;
+import org.tensorflow.lite.task.vision.detector.Detection;
+import org.tensorflow.lite.task.vision.detector.ObjectDetector;
+
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -57,6 +71,7 @@ import java.util.Map;
 public class ReplaceObjectActivity extends AppCompatActivity implements MyRender.Renderer {
   private static final String TAG = ReplaceObjectActivity.class.getSimpleName();
 
+  // Virtual Model
   private static final String MODEL_FILE_PATH = "model/";
   private static final String MODEL_TABLE = MODEL_FILE_PATH + "model_table.txt";
 
@@ -115,6 +130,21 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
   // from SelectItemActivity
   private String[] selectItems;
   private ModelTableHelper modelTableHelper;
+
+  // Object Detection
+  private static final String TF_LITE_FILE = "tflite/spaghettinet_edgetpu_l_metadata.tflite";
+  private ObjectDetector objectDetector;
+  private static final int NUM_DETECTIONS = 1;  // The maximum number of top-scored detection results to return.
+  private ImageProcessingOptions imageProcessingOptions;
+  private TensorImage tensorImage = new TensorImage(DataType.UINT8);
+  private boolean isDisplayRotation = false;
+  private DetectObject detectObject = new DetectObject();
+
+  class DetectObject {
+    String label;
+    float confidence;
+    RectF location;
+  }
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -277,12 +307,27 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
       Log.e(TAG, "Failed to read a required asset file", e);
     }
 
+    // Initialization ObjectDetector.
+    try {
+      BaseOptions.Builder baseOptionBuilder = BaseOptions.builder();
+      baseOptionBuilder.useNnapi().setNumThreads(4);
+      ObjectDetector.ObjectDetectorOptions options =
+              ObjectDetector.ObjectDetectorOptions
+                      .builder()
+                      .setBaseOptions(baseOptionBuilder.build())
+                      .setMaxResults(NUM_DETECTIONS)
+                      .build();
+      objectDetector = ObjectDetector.createFromFileAndOptions(this, TF_LITE_FILE, options);
+    } catch (IOException e) {
+      Log.e(TAG, "Failed to read a required asset file", e);
+    }
   }
 
   @Override
   public void onSurfaceChanged(MyRender render, int width, int height) {
     displayRotationHelper.onSurfaceChanged(width, height);
     virtualSceneFramebuffer.resize(width, height);
+    isDisplayRotation = true;
   }
 
   @Override
@@ -336,6 +381,34 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
 
     // Handle one tap per frame.
     handleTap(frame, camera);
+
+    // -- Object detection
+    try (Image cpuImage = frame.acquireCameraImage()) {
+      if (cpuImage.getFormat() != ImageFormat.YUV_420_888) {
+        throw new IllegalArgumentException(
+                "Expected image in YUV_420_88 format, got format " + cpuImage.getFormat());
+      }
+
+      tensorImage.load(cpuImage);
+      if (isDisplayRotation) {
+        imageProcessingOptions = ImageProcessingOptions
+                .builder()
+                .setOrientation(getTensorImageRotation(session.getCameraConfig().getCameraId()))
+                .build();
+      }
+      List<Detection> results = objectDetector.detect(tensorImage, imageProcessingOptions);
+
+      if(results.size()!=0){
+        int rotation = displayRotationHelper.getCameraSensorToDisplayRotation(session.getCameraConfig().getCameraId());
+        checkResult(cpuImage, results, rotation);
+      }else{
+        backgroundRenderer.no();
+      }
+
+    } catch (NotYetAvailableException e) {
+      // This normally means that cpu image data is not available yet. This is normal so we will not
+      // spam the logcat with this.
+    }
 
     // Keep the screen unlocked while tracking, but allow it to lock when tracking stops.
     trackingStateHelper.updateKeepScreenOnFlag(camera.getTrackingState());
@@ -398,8 +471,6 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
 
     // Compose the virtual scene with the background.
     backgroundRenderer.drawVirtualScene(render, virtualSceneFramebuffer, Z_NEAR, Z_FAR);
-
-
   }
 
   /**
@@ -500,5 +571,91 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
     for (int i = 0; i < 9 * 3; ++i) {
       sphericalHarmonicsCoefficients[i] = coefficients[i] * sphericalHarmonicFactors[i / 3];
     }
+  }
+
+  private ImageProcessingOptions.Orientation getTensorImageRotation(String cameraId) {
+    isDisplayRotation = false;
+    int rotation = displayRotationHelper.getCameraSensorToDisplayRotation(cameraId);
+    switch (rotation) {
+      case 0:
+        return ImageProcessingOptions.Orientation.TOP_LEFT;
+      case 90:
+        return ImageProcessingOptions.Orientation.RIGHT_TOP;
+      case 180:
+        return ImageProcessingOptions.Orientation.BOTTOM_RIGHT;
+      case 270:
+        return ImageProcessingOptions.Orientation.LEFT_BOTTOM;
+      default:
+        return null;
+    }
+  }
+
+  private void fillBytes(final Image.Plane[] planes, final byte[][] yuvBytes) {
+    // Because of the variable row stride it's not possible to know in
+    // advance the actual necessary dimensions of the yuv planes.
+    for (int i = 0; i < planes.length; ++i) {
+      final ByteBuffer buffer = planes[i].getBuffer();
+      if (yuvBytes[i] == null) {
+        yuvBytes[i] = new byte[buffer.capacity()];
+      }
+      buffer.get(yuvBytes[i]);
+    }
+  }
+
+  private void checkResult(Image cpuImage, List<Detection> results, int rotation){
+    // Size of results is same NUM_DETECTIONS, but this app need top1 score detection.
+    detectObject.label = results.get(0).getCategories().get(0).getLabel();
+    detectObject.confidence = results.get(0).getCategories().get(0).getScore();
+    detectObject.location = results.get(0).getBoundingBox();
+    Log.d(TAG, "checkResult: "+detectObject.location.left + " "+detectObject.location.top+" "
+    +detectObject.location.right + " "+detectObject.location.bottom);
+    // Canvasで結果を矩形を描画して、結果を確認
+    int imageWidth = cpuImage.getWidth();
+    int imageHeight = cpuImage.getHeight();
+    int cropSize = 320;
+    int[] rgbBytes = new int[imageWidth * imageHeight];
+    Bitmap rgbFrameBitmap = Bitmap.createBitmap(imageWidth, imageHeight, Bitmap.Config.ARGB_8888);
+    Bitmap croppedBitmap = Bitmap.createBitmap(cropSize, cropSize, Bitmap.Config.ARGB_8888);
+    android.graphics.Matrix frameToCropTransform =
+            ImageUtils.getTransformationMatrix(
+                    imageWidth, imageHeight,
+                    cropSize, cropSize,
+                    0, false);
+    android.graphics.Matrix cropToFrameTransform = new android.graphics.Matrix();
+    frameToCropTransform.invert(cropToFrameTransform);
+
+    // change image format from YUV to RGB
+    final Image.Plane[] planes = cpuImage.getPlanes();
+    byte[][] yuvBytes = new byte[3][];
+    fillBytes(planes, yuvBytes);
+    ImageUtils.convertYUV420ToARGB8888(
+            yuvBytes[0],
+            yuvBytes[1],
+            yuvBytes[2],
+            imageWidth,
+            imageHeight,
+            planes[0].getRowStride(),
+            planes[1].getRowStride(),
+            planes[1].getPixelStride(),
+            rgbBytes);
+
+    rgbFrameBitmap.setPixels(rgbBytes, 0, imageWidth, 0, 0, imageWidth, imageHeight);
+    /**
+    Canvas canvas = new Canvas(croppedBitmap);
+    canvas.drawBitmap(rgbFrameBitmap, frameToCropTransform, null);
+    cropToFrameTransform.mapRect(detectObject.location);
+    Paint paint = new Paint();
+    paint.setColor(Color.argb(255, 255, 0, 255));
+    canvas.drawRect(detectObject.location, paint);
+    */
+    Canvas canvas = new Canvas(rgbFrameBitmap);
+    Paint paint = new Paint();
+    paint.setColor(Color.argb(255, 255, 0, 255));
+    paint.setStyle(Paint.Style.STROKE);
+    android.graphics.Matrix matrix = ImageUtils.getTransformationMatrix(imageWidth,imageHeight,rotation);
+    matrix.mapRect(detectObject.location);
+    canvas.drawRect(detectObject.location, paint);
+
+    backgroundRenderer.updateCpuImageTexture(rgbFrameBitmap);
   }
 }

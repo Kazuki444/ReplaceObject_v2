@@ -18,9 +18,17 @@
 precision mediump float;
 
 uniform samplerExternalOES u_CameraColorTexture;
-
+uniform sampler2D u_CpuImageTexture;
+uniform bool u_isCpuImage;
 in vec2 v_CameraTexCoord;
 
 layout(location = 0) out vec4 o_FragColor;
 
-void main() { o_FragColor = texture(u_CameraColorTexture, v_CameraTexCoord); }
+//void main() { o_FragColor = texture(u_CameraColorTexture, v_CameraTexCoord); }
+void main() {
+    if(u_isCpuImage){
+        o_FragColor = texture(u_CpuImageTexture, v_CameraTexCoord);
+    }else{
+        o_FragColor = texture(u_CameraColorTexture, v_CameraTexCoord);
+    }
+}

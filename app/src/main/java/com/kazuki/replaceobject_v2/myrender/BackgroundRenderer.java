@@ -1,7 +1,9 @@
 package com.kazuki.replaceobject_v2.myrender;
 
+import android.graphics.Bitmap;
 import android.media.Image;
 import android.opengl.GLES30;
+import android.opengl.GLUtils;
 
 import com.google.ar.core.Coordinates2d;
 import com.google.ar.core.Frame;
@@ -49,6 +51,7 @@ public class BackgroundRenderer {
   private Shader occlusionShader;
   private final Texture cameraDepthTexture;
   private final Texture cameraColorTexture;
+  private final Texture cpuImageTexture;
 
   private boolean useDepthVisualization;
   private float aspectRatio;
@@ -64,6 +67,13 @@ public class BackgroundRenderer {
                     Texture.WrapMode.CLAMP_TO_EDGE,
                     /*useMipmaps=*/ false);
     cameraDepthTexture =
+            new Texture(
+                    render,
+                    Texture.Target.TEXTURE_2D,
+                    Texture.WrapMode.CLAMP_TO_EDGE,
+                    /*useMipmaps=*/ false);
+
+    cpuImageTexture =
             new Texture(
                     render,
                     Texture.Target.TEXTURE_2D,
@@ -127,6 +137,7 @@ public class BackgroundRenderer {
                       "shader/background_show_camera.frag",
                       /*defines=*/ null)
                       .setTexture("u_CameraColorTexture", cameraColorTexture)
+                      .setTexture("u_CpuImageTexture", cpuImageTexture)
                       .setDepthTest(false)
                       .setDepthWrite(false);
     }
@@ -153,7 +164,7 @@ public class BackgroundRenderer {
    * Update depth texture with Image contents.
    */
   public void updateCameraDepthTexture(Image image) {
-    // SampleRender abstraction leaks here
+    // MyRender abstraction leaks here
     GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, cameraDepthTexture.getTextureId());
     GLES30.glTexImage2D(
             GLES30.GL_TEXTURE_2D,
@@ -212,5 +223,16 @@ public class BackgroundRenderer {
    */
   public Texture getCameraDepthTexture() {
     return cameraDepthTexture;
+  }
+
+  public void updateCpuImageTexture(Bitmap rgbFrameBitmap){
+    GLES30.glActiveTexture(GLES30.GL_TEXTURE1);
+    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, cpuImageTexture.getTextureId());
+    GLUtils.texImage2D(GLES30.GL_TEXTURE_2D,0,rgbFrameBitmap,0);
+    GLES30.glActiveTexture(GLES30.GL_TEXTURE0);
+    backgroundShader.setBool("u_isCpuImage", true);
+  }
+  public void no(){
+    backgroundShader.setBool("u_isCpuImage", false);
   }
 }
