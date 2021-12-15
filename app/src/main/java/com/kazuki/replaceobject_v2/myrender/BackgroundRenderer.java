@@ -42,11 +42,15 @@ public class BackgroundRenderer {
             });
   }
 
-  private final FloatBuffer cameraTexCoords =
+  private final FloatBuffer cpuImageTexCoords =
+          ByteBuffer.allocateDirect(COORDS_BUFFER_SIZE).order(ByteOrder.nativeOrder()).asFloatBuffer();
+  private final FloatBuffer gpuImageTexCoords =
           ByteBuffer.allocateDirect(COORDS_BUFFER_SIZE).order(ByteOrder.nativeOrder()).asFloatBuffer();
 
-  private final Mesh mesh;
-  private final VertexBuffer cameraTexCoordsVertexBuffer;
+  private final Mesh cpuImageMesh;
+  private final Mesh gpuImageMesh;
+  private final VertexBuffer cpuImageTexCoordsVertexBuffer;
+  private final VertexBuffer gpuImageTexCoordsVertexBuffer;
   private Shader backgroundShader;
   private Shader occlusionShader;
   private final Texture cameraDepthTexture;
@@ -85,15 +89,22 @@ public class BackgroundRenderer {
     // before drawing), and one for the virtual scene texture coordinates (unit texture quad)
     VertexBuffer screenCoordsVertexBuffer =
             new VertexBuffer(render, /* numberOfEntriesPerVertex=*/ 2, NDC_QUAD_COORDS_BUFFER);
-    cameraTexCoordsVertexBuffer =
+    cpuImageTexCoordsVertexBuffer =
+            new VertexBuffer(render, /*numberOfEntriesPerVertex=*/ 2, /*entries=*/ null);
+    gpuImageTexCoordsVertexBuffer =
             new VertexBuffer(render, /*numberOfEntriesPerVertex=*/ 2, /*entries=*/ null);
     VertexBuffer virtualSceneTexCoordsVertexBuffer =
             new VertexBuffer(render, /* numberOfEntriesPerVertex=*/ 2, VIRTUAL_SCENE_TEX_COORDS_BUFFER);
-    VertexBuffer[] vertexBuffers = {
-            screenCoordsVertexBuffer, cameraTexCoordsVertexBuffer, virtualSceneTexCoordsVertexBuffer,
+    VertexBuffer[] cpuImageVertexBuffers = {
+            screenCoordsVertexBuffer, cpuImageTexCoordsVertexBuffer, virtualSceneTexCoordsVertexBuffer,
     };
-    mesh =
-            new Mesh(render, Mesh.PrimitiveMode.TRIANGLE_STRIP, /*indexBuffer=*/ null, vertexBuffers);
+    VertexBuffer[] gpuImageVertexBuffers = {
+            screenCoordsVertexBuffer, gpuImageTexCoordsVertexBuffer, virtualSceneTexCoordsVertexBuffer,
+    };
+    cpuImageMesh =
+            new Mesh(render, Mesh.PrimitiveMode.TRIANGLE_STRIP, /*indexBuffer=*/ null, cpuImageVertexBuffers);
+    gpuImageMesh =
+            new Mesh(render, Mesh.PrimitiveMode.TRIANGLE_STRIP, /*indexBuffer=*/ null, gpuImageVertexBuffers);
 
     // use occlusion
     occlusionShader =
@@ -136,7 +147,6 @@ public class BackgroundRenderer {
                       "shader/background_show_camera.vert",
                       "shader/background_show_camera.frag",
                       /*defines=*/ null)
-                      .setTexture("u_CameraColorTexture", cameraColorTexture)
                       .setTexture("u_CpuImageTexture", cpuImageTexture)
                       .setDepthTest(false)
                       .setDepthWrite(false);
@@ -154,9 +164,16 @@ public class BackgroundRenderer {
       frame.transformCoordinates2d(
               Coordinates2d.OPENGL_NORMALIZED_DEVICE_COORDINATES,
               NDC_QUAD_COORDS_BUFFER,
+              Coordinates2d.IMAGE_NORMALIZED,
+              cpuImageTexCoords);
+      cpuImageTexCoordsVertexBuffer.set(cpuImageTexCoords);
+
+      frame.transformCoordinates2d(
+              Coordinates2d.OPENGL_NORMALIZED_DEVICE_COORDINATES,
+              NDC_QUAD_COORDS_BUFFER,
               Coordinates2d.TEXTURE_NORMALIZED,
-              cameraTexCoords);
-      cameraTexCoordsVertexBuffer.set(cameraTexCoords);
+              gpuImageTexCoords);
+      gpuImageTexCoordsVertexBuffer.set(gpuImageTexCoords);
     }
   }
 
@@ -189,7 +206,7 @@ public class BackgroundRenderer {
    * accurately follow static physical objects.
    */
   public void drawBackground(MyRender render) {
-    render.draw(mesh, backgroundShader);
+    render.draw(cpuImageMesh, backgroundShader);
   }
 
   /**
@@ -208,7 +225,7 @@ public class BackgroundRenderer {
             .setTexture("u_VirtualSceneDepthTexture", virtualSceneFramebuffer.getDepthTexture())
             .setFloat("u_ZNear", zNear)
             .setFloat("u_ZFar", zFar);
-    render.draw(mesh, occlusionShader);
+    render.draw(gpuImageMesh, occlusionShader);
   }
 
   /**
@@ -226,13 +243,7 @@ public class BackgroundRenderer {
   }
 
   public void updateCpuImageTexture(Bitmap rgbFrameBitmap){
-    GLES30.glActiveTexture(GLES30.GL_TEXTURE1);
     GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, cpuImageTexture.getTextureId());
     GLUtils.texImage2D(GLES30.GL_TEXTURE_2D,0,rgbFrameBitmap,0);
-    GLES30.glActiveTexture(GLES30.GL_TEXTURE0);
-    backgroundShader.setBool("u_isCpuImage", true);
-  }
-  public void no(){
-    backgroundShader.setBool("u_isCpuImage", false);
   }
 }

@@ -10,6 +10,7 @@ import android.media.Image;
 import android.opengl.GLSurfaceView;
 import android.opengl.Matrix;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.util.Log;
 import android.view.MotionEvent;
 import android.view.View;
@@ -60,6 +61,7 @@ import org.tensorflow.lite.task.vision.detector.ObjectDetector;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.IntBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -95,7 +97,9 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
 
   // UI
   private Switch showDepthMapSwitch;
+  private boolean isShowDepthMap = false;
   private Switch inpaintSwitch;
+  private boolean isInapint = false;
   private final ArrayList<View> ui = new ArrayList<>();
 
   private boolean installRequested;
@@ -107,13 +111,12 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
   private MyRender render;
 
   private BackgroundRenderer backgroundRenderer;
-  private boolean isShowDepthMap = false;
   private Framebuffer virtualSceneFramebuffer;
   private boolean hasSetTextureNames = false;
 
   // Virtual object
   private final Map<String, VirtualObjectRenderer> virtualObjectRenderers = new HashMap<>();
-  private final ArrayList<Anchor> anchors = new ArrayList<>();
+  private final ArrayList<Anchor> anchors = new ArrayList<>();  // This app track only one anchor.
 
   // Temporary matrix allocated here to reduce number of allocations for each frame.
   private final float[] modelMatrix = new float[16];
@@ -132,19 +135,10 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
   private ModelTableHelper modelTableHelper;
 
   // Object Detection
-  private static final String TF_LITE_FILE = "tflite/spaghettinet_edgetpu_l_metadata.tflite";
-  private ObjectDetector objectDetector;
-  private static final int NUM_DETECTIONS = 1;  // The maximum number of top-scored detection results to return.
-  private ImageProcessingOptions imageProcessingOptions;
-  private TensorImage tensorImage = new TensorImage(DataType.UINT8);
-  private boolean isDisplayRotation = false;
-  private DetectObject detectObject = new DetectObject();
-
-  class DetectObject {
-    String label;
-    float confidence;
-    RectF location;
-  }
+  private ML ml = new ML();
+  //private Bitmap rgbFrameBitmap = Bitmap.createBitmap(640, 480, Bitmap.Config.ARGB_8888);
+  private Bitmap rgbFrameBitmap;
+  private boolean isBitmapInitialize = false;
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -164,6 +158,10 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
     // set up switch
     showDepthMapSwitch.setOnCheckedChangeListener((compoundButton, isChecked) -> {
       isShowDepthMap = isChecked ? true : false;
+    });
+    inpaintSwitch.setOnCheckedChangeListener((compoundButton, isChecked) -> {
+      isInapint = isChecked ? true : false;
+      clearAnchor();
     });
 
     // set up renderer
@@ -309,15 +307,7 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
 
     // Initialization ObjectDetector.
     try {
-      BaseOptions.Builder baseOptionBuilder = BaseOptions.builder();
-      baseOptionBuilder.useNnapi().setNumThreads(4);
-      ObjectDetector.ObjectDetectorOptions options =
-              ObjectDetector.ObjectDetectorOptions
-                      .builder()
-                      .setBaseOptions(baseOptionBuilder.build())
-                      .setMaxResults(NUM_DETECTIONS)
-                      .build();
-      objectDetector = ObjectDetector.createFromFileAndOptions(this, TF_LITE_FILE, options);
+      ml.initializeObjectDetector(this);
     } catch (IOException e) {
       Log.e(TAG, "Failed to read a required asset file", e);
     }
@@ -327,7 +317,7 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
   public void onSurfaceChanged(MyRender render, int width, int height) {
     displayRotationHelper.onSurfaceChanged(width, height);
     virtualSceneFramebuffer.resize(width, height);
-    isDisplayRotation = true;
+    ml.isDisplayRotate();
   }
 
   @Override
@@ -388,27 +378,82 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
         throw new IllegalArgumentException(
                 "Expected image in YUV_420_88 format, got format " + cpuImage.getFormat());
       }
-
-      tensorImage.load(cpuImage);
-      if (isDisplayRotation) {
-        imageProcessingOptions = ImageProcessingOptions
-                .builder()
-                .setOrientation(getTensorImageRotation(session.getCameraConfig().getCameraId()))
-                .build();
-      }
-      List<Detection> results = objectDetector.detect(tensorImage, imageProcessingOptions);
-
-      if(results.size()!=0){
-        int rotation = displayRotationHelper.getCameraSensorToDisplayRotation(session.getCameraConfig().getCameraId());
-        checkResult(cpuImage, results, rotation);
-      }else{
-        backgroundRenderer.no();
-      }
+      int cameraSensorToDisplayRotation =
+              displayRotationHelper.getCameraSensorToDisplayRotation(session.getCameraConfig().getCameraId());
+      ml.detect(cpuImage,cameraSensorToDisplayRotation);
 
     } catch (NotYetAvailableException e) {
       // This normally means that cpu image data is not available yet. This is normal so we will not
       // spam the logcat with this.
     }
+
+    // -- Inpaint depth image and cpu image.
+    /**
+    if (ml.getResultNum() != 0) {
+      if (isInapint && !isShowDepthMap) {
+        try (Image cpuImage = frame.acquireCameraImage();
+             Image depthImage = frame.acquireDepthImage()) {
+          // Inpaint depth image.
+          // Inapint cpu image.
+        } catch (NotYetAvailableException e) {
+          // This normally means that cpu image data is not available yet. This is normal so we will not
+          // spam the logcat with this.
+        }
+
+      } else if (isInapint && isShowDepthMap) {
+
+        try (Image cpuImage = frame.acquireCameraImage()) {
+          // Inpaint cpu Image.
+        } catch (NotYetAvailableException e) {
+          // This normally means that cpu image data is not available yet. This is normal so we will not
+          // spam the logcat with this.
+        }
+      }
+    }*/
+
+    // Update background image.
+    try(Image cpuImage = frame.acquireCameraImage()){
+      // Canvasで結果を矩形を描画して、結果を確認
+      long start = SystemClock.uptimeMillis();
+      int imageWidth = cpuImage.getWidth();
+      int imageHeight = cpuImage.getHeight();
+      if(!isBitmapInitialize){
+        rgbFrameBitmap = Bitmap.createBitmap(imageWidth, imageHeight, Bitmap.Config.ARGB_8888);
+        isBitmapInitialize = true;
+      }
+      int[] rgbBytes = new int[imageWidth * imageHeight];
+
+      // change image format from YUV to RGB
+      final Image.Plane[] planes = cpuImage.getPlanes();
+      byte[][] yuvBytes = new byte[3][];
+      fillBytes(planes, yuvBytes);
+      ImageUtils.convertYUV420ToARGB8888(
+              yuvBytes[0],
+              yuvBytes[1],
+              yuvBytes[2],
+              imageWidth,
+              imageHeight,
+              planes[0].getRowStride(),
+              planes[1].getRowStride(),
+              planes[1].getPixelStride(),
+              rgbBytes);
+
+      rgbFrameBitmap.setPixels(rgbBytes, 0, imageWidth, 0, 0, imageWidth, imageHeight);
+
+      Canvas canvas = new Canvas(rgbFrameBitmap);
+      Paint paint = new Paint();
+      paint.setColor(Color.argb(255, 255, 0, 255));
+      paint.setStyle(Paint.Style.STROKE);
+      canvas.drawRect(ml.getLocation(), paint);
+      backgroundRenderer.updateCpuImageTexture(rgbFrameBitmap);
+      long processTime = SystemClock.uptimeMillis() - start;
+      Log.d(TAG, "YUVtoRGB: process time = "+processTime);
+    }catch (NotYetAvailableException e){
+
+    }
+
+    //backgroundRenderer.updateCpuImageTexture(rgbFrameBitmap);
+    //backgroundRenderer.updateCameraDepthTexture();
 
     // Keep the screen unlocked while tracking, but allow it to lock when tracking stops.
     trackingStateHelper.updateKeepScreenOnFlag(camera.getTrackingState());
@@ -425,6 +470,9 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
     if (camera.getTrackingState() == TrackingState.PAUSED) {
       return;
     }
+
+    // If show depth map, don't draw 3D objects.
+    if (isShowDepthMap) return;
 
     // -- Draw occluded virtual objects
 
@@ -491,6 +539,7 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
 
   // Handle only one tap per frame, as taps are usually low frequency compared to frame rate.
   private void handleTap(Frame frame, Camera camera) {
+    if (isShowDepthMap) return;
     MotionEvent tap = gestureHelper.poll();
     if (tap != null && camera.getTrackingState() == TrackingState.TRACKING) {
       List<HitResult> hitResultList;
@@ -508,7 +557,7 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
                 || (trackable instanceof DepthPoint)) {
           // Cap the number of objects created. This avoids overloading both the
           // rendering system and ARCore.
-          if (anchors.size() >= 20) {
+          if (anchors.size() >= 1) {
             anchors.get(0).detach();
             anchors.remove(0);
           }
@@ -573,22 +622,6 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
     }
   }
 
-  private ImageProcessingOptions.Orientation getTensorImageRotation(String cameraId) {
-    isDisplayRotation = false;
-    int rotation = displayRotationHelper.getCameraSensorToDisplayRotation(cameraId);
-    switch (rotation) {
-      case 0:
-        return ImageProcessingOptions.Orientation.TOP_LEFT;
-      case 90:
-        return ImageProcessingOptions.Orientation.RIGHT_TOP;
-      case 180:
-        return ImageProcessingOptions.Orientation.BOTTOM_RIGHT;
-      case 270:
-        return ImageProcessingOptions.Orientation.LEFT_BOTTOM;
-      default:
-        return null;
-    }
-  }
 
   private void fillBytes(final Image.Plane[] planes, final byte[][] yuvBytes) {
     // Because of the variable row stride it's not possible to know in
@@ -602,60 +635,10 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
     }
   }
 
-  private void checkResult(Image cpuImage, List<Detection> results, int rotation){
-    // Size of results is same NUM_DETECTIONS, but this app need top1 score detection.
-    detectObject.label = results.get(0).getCategories().get(0).getLabel();
-    detectObject.confidence = results.get(0).getCategories().get(0).getScore();
-    detectObject.location = results.get(0).getBoundingBox();
-    Log.d(TAG, "checkResult: "+detectObject.location.left + " "+detectObject.location.top+" "
-    +detectObject.location.right + " "+detectObject.location.bottom);
-    // Canvasで結果を矩形を描画して、結果を確認
-    int imageWidth = cpuImage.getWidth();
-    int imageHeight = cpuImage.getHeight();
-    int cropSize = 320;
-    int[] rgbBytes = new int[imageWidth * imageHeight];
-    Bitmap rgbFrameBitmap = Bitmap.createBitmap(imageWidth, imageHeight, Bitmap.Config.ARGB_8888);
-    Bitmap croppedBitmap = Bitmap.createBitmap(cropSize, cropSize, Bitmap.Config.ARGB_8888);
-    android.graphics.Matrix frameToCropTransform =
-            ImageUtils.getTransformationMatrix(
-                    imageWidth, imageHeight,
-                    cropSize, cropSize,
-                    0, false);
-    android.graphics.Matrix cropToFrameTransform = new android.graphics.Matrix();
-    frameToCropTransform.invert(cropToFrameTransform);
-
-    // change image format from YUV to RGB
-    final Image.Plane[] planes = cpuImage.getPlanes();
-    byte[][] yuvBytes = new byte[3][];
-    fillBytes(planes, yuvBytes);
-    ImageUtils.convertYUV420ToARGB8888(
-            yuvBytes[0],
-            yuvBytes[1],
-            yuvBytes[2],
-            imageWidth,
-            imageHeight,
-            planes[0].getRowStride(),
-            planes[1].getRowStride(),
-            planes[1].getPixelStride(),
-            rgbBytes);
-
-    rgbFrameBitmap.setPixels(rgbBytes, 0, imageWidth, 0, 0, imageWidth, imageHeight);
-    /**
-    Canvas canvas = new Canvas(croppedBitmap);
-    canvas.drawBitmap(rgbFrameBitmap, frameToCropTransform, null);
-    cropToFrameTransform.mapRect(detectObject.location);
-    Paint paint = new Paint();
-    paint.setColor(Color.argb(255, 255, 0, 255));
-    canvas.drawRect(detectObject.location, paint);
-    */
-    Canvas canvas = new Canvas(rgbFrameBitmap);
-    Paint paint = new Paint();
-    paint.setColor(Color.argb(255, 255, 0, 255));
-    paint.setStyle(Paint.Style.STROKE);
-    android.graphics.Matrix matrix = ImageUtils.getTransformationMatrix(imageWidth,imageHeight,rotation);
-    matrix.mapRect(detectObject.location);
-    canvas.drawRect(detectObject.location, paint);
-
-    backgroundRenderer.updateCpuImageTexture(rgbFrameBitmap);
+  private void clearAnchor() {
+    if (anchors.size() != 0) {
+      anchors.get(0).detach();
+      anchors.remove(0);
+    }
   }
 }
