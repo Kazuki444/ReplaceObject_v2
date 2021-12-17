@@ -61,6 +61,7 @@ import org.tensorflow.lite.task.vision.detector.ObjectDetector;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.IntBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -136,9 +137,13 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
 
   // Object Detection
   private ML ml = new ML();
-  //private Bitmap rgbFrameBitmap = Bitmap.createBitmap(640, 480, Bitmap.Config.ARGB_8888);
   private Bitmap rgbFrameBitmap;
+  int[] rgbBytes;
+  byte[][] yuvBytes;
   private boolean isBitmapInitialize = false;
+
+  // Inpaint cpu image and depth image.
+  private InpaintImage inpaintImage = new InpaintImage();
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -380,7 +385,7 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
       }
       int cameraSensorToDisplayRotation =
               displayRotationHelper.getCameraSensorToDisplayRotation(session.getCameraConfig().getCameraId());
-      ml.detect(cpuImage,cameraSensorToDisplayRotation);
+      ml.detect(cpuImage, cameraSensorToDisplayRotation);
 
     } catch (NotYetAvailableException e) {
       // This normally means that cpu image data is not available yet. This is normal so we will not
@@ -389,66 +394,32 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
 
     // -- Inpaint depth image and cpu image.
     /**
-    if (ml.getResultNum() != 0) {
-      if (isInapint && !isShowDepthMap) {
-        try (Image cpuImage = frame.acquireCameraImage();
-             Image depthImage = frame.acquireDepthImage()) {
-          // Inpaint depth image.
-          // Inapint cpu image.
-        } catch (NotYetAvailableException e) {
-          // This normally means that cpu image data is not available yet. This is normal so we will not
-          // spam the logcat with this.
-        }
+     if (ml.getResultNum() != 0) {
+     if (isInapint && !isShowDepthMap) {
+     try (Image cpuImage = frame.acquireCameraImage();
+     Image depthImage = frame.acquireDepthImage()) {
+     // Inpaint depth image.
+     // Inapint cpu image.
+     } catch (NotYetAvailableException e) {
+     // This normally means that cpu image data is not available yet. This is normal so we will not
+     // spam the logcat with this.
+     }
 
-      } else if (isInapint && isShowDepthMap) {
+     } else if (isInapint && isShowDepthMap) {
 
-        try (Image cpuImage = frame.acquireCameraImage()) {
-          // Inpaint cpu Image.
-        } catch (NotYetAvailableException e) {
-          // This normally means that cpu image data is not available yet. This is normal so we will not
-          // spam the logcat with this.
-        }
-      }
-    }*/
+     try (Image cpuImage = frame.acquireCameraImage()) {
+     // Inpaint cpu Image.
+     } catch (NotYetAvailableException e) {
+     // This normally means that cpu image data is not available yet. This is normal so we will not
+     // spam the logcat with this.
+     }
+     }
+     }*/
 
     // Update background image.
-    try(Image cpuImage = frame.acquireCameraImage()){
-      // Canvasで結果を矩形を描画して、結果を確認
-      long start = SystemClock.uptimeMillis();
-      int imageWidth = cpuImage.getWidth();
-      int imageHeight = cpuImage.getHeight();
-      if(!isBitmapInitialize){
-        rgbFrameBitmap = Bitmap.createBitmap(imageWidth, imageHeight, Bitmap.Config.ARGB_8888);
-        isBitmapInitialize = true;
-      }
-      int[] rgbBytes = new int[imageWidth * imageHeight];
-
-      // change image format from YUV to RGB
-      final Image.Plane[] planes = cpuImage.getPlanes();
-      byte[][] yuvBytes = new byte[3][];
-      fillBytes(planes, yuvBytes);
-      ImageUtils.convertYUV420ToARGB8888(
-              yuvBytes[0],
-              yuvBytes[1],
-              yuvBytes[2],
-              imageWidth,
-              imageHeight,
-              planes[0].getRowStride(),
-              planes[1].getRowStride(),
-              planes[1].getPixelStride(),
-              rgbBytes);
-
-      rgbFrameBitmap.setPixels(rgbBytes, 0, imageWidth, 0, 0, imageWidth, imageHeight);
-
-      Canvas canvas = new Canvas(rgbFrameBitmap);
-      Paint paint = new Paint();
-      paint.setColor(Color.argb(255, 255, 0, 255));
-      paint.setStyle(Paint.Style.STROKE);
-      canvas.drawRect(ml.getLocation(), paint);
-      backgroundRenderer.updateCpuImageTexture(rgbFrameBitmap);
-      long processTime = SystemClock.uptimeMillis() - start;
-      Log.d(TAG, "YUVtoRGB: process time = "+processTime);
-    }catch (NotYetAvailableException e){
+    try (Image cpuImage = frame.acquireCameraImage()) {
+      backgroundRenderer.updateCpuImageTexture(inpaintImage.inpaintCpuImage(cpuImage, ml.getLocation()));
+    } catch (NotYetAvailableException e) {
 
     }
 
@@ -619,19 +590,6 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
     // Apply each factor to every component of each coefficient
     for (int i = 0; i < 9 * 3; ++i) {
       sphericalHarmonicsCoefficients[i] = coefficients[i] * sphericalHarmonicFactors[i / 3];
-    }
-  }
-
-
-  private void fillBytes(final Image.Plane[] planes, final byte[][] yuvBytes) {
-    // Because of the variable row stride it's not possible to know in
-    // advance the actual necessary dimensions of the yuv planes.
-    for (int i = 0; i < planes.length; ++i) {
-      final ByteBuffer buffer = planes[i].getBuffer();
-      if (yuvBytes[i] == null) {
-        yuvBytes[i] = new byte[buffer.capacity()];
-      }
-      buffer.get(yuvBytes[i]);
     }
   }
 
