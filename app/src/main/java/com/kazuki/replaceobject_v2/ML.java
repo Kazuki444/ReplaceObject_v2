@@ -34,6 +34,7 @@ public class ML {
   private String label;
   private float confidence;
   private RectF location;
+  private final int[] locationIndex = new int[4];
   private int resultNum;
 
   private boolean isDisplayRotation = false;
@@ -85,10 +86,19 @@ public class ML {
       confidence = results.get(0).getCategories().get(0).getScore();
       location = results.get(0).getBoundingBox();
 
+      int width = image.getWidth();
+      int height = image.getHeight();
+
       // Adjust the BB location correctly.
       Matrix matrix = ImageUtils.getTransformationMatrix(
-              image.getWidth(), image.getHeight(), cameraSensorToDisplayRotation);
+              width, height, cameraSensorToDisplayRotation);
       matrix.mapRect(location);
+
+      // Calc BB location index of the image.  X=[0, image.width()] Y=[0, image.height()]
+      locationIndex[0] = location.left < 0 ? 0 : (int) location.left;
+      locationIndex[1] = location.top < 0 ? 0 : (int) location.top;
+      locationIndex[2] = location.right >= width ? width - 1 : (int) location.right;
+      locationIndex[3] = location.bottom >= height ? height - 1 : (int) location.bottom;
 
       resultNum = 1;
     } else {
@@ -128,4 +138,10 @@ public class ML {
   public int getResultNum() {
     return resultNum;
   }
+
+  public int[] getLocationIndex() {
+    return locationIndex;
+  }
+
+  ;
 }
