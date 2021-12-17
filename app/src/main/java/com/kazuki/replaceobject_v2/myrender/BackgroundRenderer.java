@@ -44,13 +44,13 @@ public class BackgroundRenderer {
 
   private final FloatBuffer cpuImageTexCoords =
           ByteBuffer.allocateDirect(COORDS_BUFFER_SIZE).order(ByteOrder.nativeOrder()).asFloatBuffer();
-  private final FloatBuffer gpuImageTexCoords =
+  private final FloatBuffer depthImageTexCoords =
           ByteBuffer.allocateDirect(COORDS_BUFFER_SIZE).order(ByteOrder.nativeOrder()).asFloatBuffer();
 
   private final Mesh cpuImageMesh;
-  private final Mesh gpuImageMesh;
+  private final Mesh depthImageMesh;
   private final VertexBuffer cpuImageTexCoordsVertexBuffer;
-  private final VertexBuffer gpuImageTexCoordsVertexBuffer;
+  private final VertexBuffer depthImageTexCoordsVertexBuffer;
   private Shader backgroundShader;
   private Shader occlusionShader;
   private final Texture cameraDepthTexture;
@@ -91,20 +91,20 @@ public class BackgroundRenderer {
             new VertexBuffer(render, /* numberOfEntriesPerVertex=*/ 2, NDC_QUAD_COORDS_BUFFER);
     cpuImageTexCoordsVertexBuffer =
             new VertexBuffer(render, /*numberOfEntriesPerVertex=*/ 2, /*entries=*/ null);
-    gpuImageTexCoordsVertexBuffer =
+    depthImageTexCoordsVertexBuffer =
             new VertexBuffer(render, /*numberOfEntriesPerVertex=*/ 2, /*entries=*/ null);
     VertexBuffer virtualSceneTexCoordsVertexBuffer =
             new VertexBuffer(render, /* numberOfEntriesPerVertex=*/ 2, VIRTUAL_SCENE_TEX_COORDS_BUFFER);
     VertexBuffer[] cpuImageVertexBuffers = {
             screenCoordsVertexBuffer, cpuImageTexCoordsVertexBuffer, virtualSceneTexCoordsVertexBuffer,
     };
-    VertexBuffer[] gpuImageVertexBuffers = {
-            screenCoordsVertexBuffer, gpuImageTexCoordsVertexBuffer, virtualSceneTexCoordsVertexBuffer,
+    VertexBuffer[] depthImageVertexBuffers = {
+            screenCoordsVertexBuffer, depthImageTexCoordsVertexBuffer, virtualSceneTexCoordsVertexBuffer,
     };
     cpuImageMesh =
             new Mesh(render, Mesh.PrimitiveMode.TRIANGLE_STRIP, /*indexBuffer=*/ null, cpuImageVertexBuffers);
-    gpuImageMesh =
-            new Mesh(render, Mesh.PrimitiveMode.TRIANGLE_STRIP, /*indexBuffer=*/ null, gpuImageVertexBuffers);
+    depthImageMesh =
+            new Mesh(render, Mesh.PrimitiveMode.TRIANGLE_STRIP, /*indexBuffer=*/ null, depthImageVertexBuffers);
 
     // use occlusion
     occlusionShader =
@@ -172,8 +172,8 @@ public class BackgroundRenderer {
               Coordinates2d.OPENGL_NORMALIZED_DEVICE_COORDINATES,
               NDC_QUAD_COORDS_BUFFER,
               Coordinates2d.TEXTURE_NORMALIZED,
-              gpuImageTexCoords);
-      gpuImageTexCoordsVertexBuffer.set(gpuImageTexCoords);
+              depthImageTexCoords);
+      depthImageTexCoordsVertexBuffer.set(depthImageTexCoords);
     }
   }
 
@@ -206,7 +206,8 @@ public class BackgroundRenderer {
    * accurately follow static physical objects.
    */
   public void drawBackground(MyRender render) {
-    render.draw(cpuImageMesh, backgroundShader);
+    if(!useDepthVisualization) render.draw(cpuImageMesh, backgroundShader);
+    else render.draw(depthImageMesh, backgroundShader);
   }
 
   /**
@@ -225,7 +226,7 @@ public class BackgroundRenderer {
             .setTexture("u_VirtualSceneDepthTexture", virtualSceneFramebuffer.getDepthTexture())
             .setFloat("u_ZNear", zNear)
             .setFloat("u_ZFar", zFar);
-    render.draw(gpuImageMesh, occlusionShader);
+    render.draw(depthImageMesh, occlusionShader);
   }
 
   /**
