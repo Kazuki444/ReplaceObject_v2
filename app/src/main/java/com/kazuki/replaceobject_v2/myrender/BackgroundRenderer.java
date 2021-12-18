@@ -4,14 +4,17 @@ import android.graphics.Bitmap;
 import android.media.Image;
 import android.opengl.GLES30;
 import android.opengl.GLUtils;
+import android.util.Log;
 
 import com.google.ar.core.Coordinates2d;
 import com.google.ar.core.Frame;
 
 import java.io.IOException;
+import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
+import java.nio.ShortBuffer;
 import java.util.HashMap;
 
 /**
@@ -180,21 +183,21 @@ public class BackgroundRenderer {
   /**
    * Update depth texture with Image contents.
    */
-  public void updateCameraDepthTexture(Image image) {
+  public void updateCameraDepthTexture(int width, int height, ShortBuffer buffer) {
     // MyRender abstraction leaks here
     GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, cameraDepthTexture.getTextureId());
     GLES30.glTexImage2D(
             GLES30.GL_TEXTURE_2D,
             0,
             GLES30.GL_RG8,
-            image.getWidth(),
-            image.getHeight(),
+            width,
+            height,
             0,
             GLES30.GL_RG,
             GLES30.GL_UNSIGNED_BYTE,
-            image.getPlanes()[0].getBuffer());
+            buffer);
 
-    aspectRatio = (float) image.getWidth() / (float) image.getHeight();
+    aspectRatio = (float) width / (float) height;
     occlusionShader.setFloat("u_DepthAspectRatio", aspectRatio);
 
   }

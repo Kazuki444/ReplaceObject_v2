@@ -63,6 +63,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.IntBuffer;
+import java.nio.ShortBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -137,13 +138,13 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
 
   // Object Detection
   private ML ml = new ML();
-  private Bitmap rgbFrameBitmap;
-  int[] rgbBytes;
-  byte[][] yuvBytes;
-  private boolean isBitmapInitialize = false;
 
   // Inpaint cpu image and depth image.
   private InpaintImage inpaintImage = new InpaintImage();
+
+  // Background texture date.
+  private BackgroundTextureData backgroundTextureData;
+  private boolean isInitBackgroundTextureDate = false;
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -365,17 +366,8 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
     // used to draw the background camera image.
     backgroundRenderer.updateDisplayGeometry(frame);
 
-    if (camera.getTrackingState() == TrackingState.TRACKING) {
-      try (Image depthImage = frame.acquireDepthImage()) {
-        backgroundRenderer.updateCameraDepthTexture(depthImage);
-      } catch (NotYetAvailableException e) {
-        // This normally means that depth data is not available yet. This is normal so we will not
-        // spam the logcat with this.
-      }
-    }
+    if (camera.getTrackingState() != TrackingState.TRACKING) return;
 
-    // Handle one tap per frame.
-    handleTap(frame, camera);
 
     // -- Object detection
     try (Image cpuImage = frame.acquireCameraImage()) {
@@ -391,40 +383,41 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
       // This normally means that cpu image data is not available yet. This is normal so we will not
       // spam the logcat with this.
     }
-
-    // -- Inpaint depth image and cpu image.
-    /**
-     if (ml.getResultNum() != 0) {
-     if (isInapint && !isShowDepthMap) {
-     try (Image cpuImage = frame.acquireCameraImage();
-     Image depthImage = frame.acquireDepthImage()) {
-     // Inpaint depth image.
-     // Inapint cpu image.
-     } catch (NotYetAvailableException e) {
-     // This normally means that cpu image data is not available yet. This is normal so we will not
-     // spam the logcat with this.
-     }
-
-     } else if (isInapint && isShowDepthMap) {
-
-     try (Image cpuImage = frame.acquireCameraImage()) {
-     // Inpaint cpu Image.
-     } catch (NotYetAvailableException e) {
-     // This normally means that cpu image data is not available yet. This is normal so we will not
-     // spam the logcat with this.
-     }
-     }
-     }*/
-
-    // Update background image.
-    try (Image cpuImage = frame.acquireCameraImage()) {
-      backgroundRenderer.updateCpuImageTexture(inpaintImage.inpaintCpuImage(cpuImage, ml.getLocation()));
-    } catch (NotYetAvailableException e) {
-
+    
+    // init background data
+    if (!isInitBackgroundTextureDate){
+      try{
+        backgroundTextureData = new BackgroundTextureData(frame);
+      }catch (NotYetAvailableException e){
+        return;
+      }
+      isInitBackgroundTextureDate=true;
     }
 
-    //backgroundRenderer.updateCpuImageTexture(rgbFrameBitmap);
-    //backgroundRenderer.updateCameraDepthTexture();
+    // set background data
+    backgroundTextureData.set(frame);
+
+    // -- Inpaint ,if you need
+    if (ml.getResultNum() != 0 && isInapint && !isShowDepthMap) {
+      backgroundTextureData.inpaintDepthImage(ml.getLocation());
+      backgroundTextureData.inpaintCpuImage(ml.getLocation());
+    } else if (ml.getResultNum() != 0 && isInapint && isShowDepthMap) {
+      backgroundTextureData.inpaintDepthImage(ml.getLocation());
+    }
+
+    // update background data
+    backgroundTextureData.update(ml.getLocation(),ml.getResultNum());
+
+    // update background texture
+    backgroundRenderer.updateCpuImageTexture(backgroundTextureData.getCpuImageBitmap());
+    backgroundRenderer.updateCameraDepthTexture(
+            backgroundTextureData.getDepthImageWidth(),
+            backgroundTextureData.getDepthImageHeight(),
+            backgroundTextureData.getDepthImageBytes()
+    );
+
+    // Handle one tap per frame.
+    handleTap(frame, camera);
 
     // Keep the screen unlocked while tracking, but allow it to lock when tracking stops.
     trackingStateHelper.updateKeepScreenOnFlag(camera.getTrackingState());

@@ -95,10 +95,10 @@ public class ML {
       matrix.mapRect(location);
 
       // Calc BB location index of the image.  X=[0, image.width()] Y=[0, image.height()]
-      locationIndex[0] = location.left < 0 ? 0 : (int) location.left;
-      locationIndex[1] = location.top < 0 ? 0 : (int) location.top;
-      locationIndex[2] = location.right >= width ? width - 1 : (int) location.right;
-      locationIndex[3] = location.bottom >= height ? height - 1 : (int) location.bottom;
+      locationIndex[0] = location.left >= 0 ? (int) location.left : 0;
+      locationIndex[1] = location.top >= 0 ? (int) location.top : 0;
+      locationIndex[2] = location.right < width ? (int) location.right : width - 1;
+      locationIndex[3] = location.bottom < height ? (int) location.bottom : height - 1;
 
       resultNum = 1;
     } else {

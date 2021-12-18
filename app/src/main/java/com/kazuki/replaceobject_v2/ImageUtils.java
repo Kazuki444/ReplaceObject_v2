@@ -4,10 +4,13 @@ import android.graphics.Bitmap;
 import android.graphics.Matrix;
 import android.media.Image;
 
+import java.nio.ByteBuffer;
+import java.nio.IntBuffer;
+
 public class ImageUtils {
   // This value is 2 ^ 18 - 1, and is used to clamp the RGB values before their ranges
   // are normalized to eight bits.
-  static final int kMaxChannelValue = 262143;
+  private static final int kMaxChannelValue = 262143;
 
   private static int YUV2RGB(int y, int u, int v) {
     // Adjust and check YUV values
@@ -70,5 +73,6 @@ public class ImageUtils {
 
     return matrix;
   }
+
 
 }
