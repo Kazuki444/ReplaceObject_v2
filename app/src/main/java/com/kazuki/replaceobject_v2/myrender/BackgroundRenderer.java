@@ -1,15 +1,20 @@
 package com.kazuki.replaceobject_v2.myrender;
 
+import android.graphics.Bitmap;
 import android.media.Image;
 import android.opengl.GLES30;
+import android.opengl.GLUtils;
+import android.util.Log;
 
 import com.google.ar.core.Coordinates2d;
 import com.google.ar.core.Frame;
 
 import java.io.IOException;
+import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
+import java.nio.ShortBuffer;
 import java.util.HashMap;
 
 /**
@@ -40,15 +45,20 @@ public class BackgroundRenderer {
             });
   }
 
-  private final FloatBuffer cameraTexCoords =
+  private final FloatBuffer cpuImageTexCoords =
+          ByteBuffer.allocateDirect(COORDS_BUFFER_SIZE).order(ByteOrder.nativeOrder()).asFloatBuffer();
+  private final FloatBuffer depthImageTexCoords =
           ByteBuffer.allocateDirect(COORDS_BUFFER_SIZE).order(ByteOrder.nativeOrder()).asFloatBuffer();
 
-  private final Mesh mesh;
-  private final VertexBuffer cameraTexCoordsVertexBuffer;
+  private final Mesh cpuImageMesh;
+  private final Mesh depthImageMesh;
+  private final VertexBuffer cpuImageTexCoordsVertexBuffer;
+  private final VertexBuffer depthImageTexCoordsVertexBuffer;
   private Shader backgroundShader;
   private Shader occlusionShader;
   private final Texture cameraDepthTexture;
   private final Texture cameraColorTexture;
+  private final Texture cpuImageTexture;
 
   private boolean useDepthVisualization;
   private float aspectRatio;
@@ -70,20 +80,34 @@ public class BackgroundRenderer {
                     Texture.WrapMode.CLAMP_TO_EDGE,
                     /*useMipmaps=*/ false);
 
+    cpuImageTexture =
+            new Texture(
+                    render,
+                    Texture.Target.TEXTURE_2D,
+                    Texture.WrapMode.CLAMP_TO_EDGE,
+                    /*useMipmaps=*/ false);
+
     // Create a Mesh with three vertex buffers: one for the screen coordinates (normalized device
     // coordinates), one for the camera texture coordinates (to be populated with proper data later
     // before drawing), and one for the virtual scene texture coordinates (unit texture quad)
     VertexBuffer screenCoordsVertexBuffer =
             new VertexBuffer(render, /* numberOfEntriesPerVertex=*/ 2, NDC_QUAD_COORDS_BUFFER);
-    cameraTexCoordsVertexBuffer =
+    cpuImageTexCoordsVertexBuffer =
+            new VertexBuffer(render, /*numberOfEntriesPerVertex=*/ 2, /*entries=*/ null);
+    depthImageTexCoordsVertexBuffer =
             new VertexBuffer(render, /*numberOfEntriesPerVertex=*/ 2, /*entries=*/ null);
     VertexBuffer virtualSceneTexCoordsVertexBuffer =
             new VertexBuffer(render, /* numberOfEntriesPerVertex=*/ 2, VIRTUAL_SCENE_TEX_COORDS_BUFFER);
-    VertexBuffer[] vertexBuffers = {
-            screenCoordsVertexBuffer, cameraTexCoordsVertexBuffer, virtualSceneTexCoordsVertexBuffer,
+    VertexBuffer[] cpuImageVertexBuffers = {
+            screenCoordsVertexBuffer, cpuImageTexCoordsVertexBuffer, virtualSceneTexCoordsVertexBuffer,
     };
-    mesh =
-            new Mesh(render, Mesh.PrimitiveMode.TRIANGLE_STRIP, /*indexBuffer=*/ null, vertexBuffers);
+    VertexBuffer[] depthImageVertexBuffers = {
+            screenCoordsVertexBuffer, depthImageTexCoordsVertexBuffer, virtualSceneTexCoordsVertexBuffer,
+    };
+    cpuImageMesh =
+            new Mesh(render, Mesh.PrimitiveMode.TRIANGLE_STRIP, /*indexBuffer=*/ null, cpuImageVertexBuffers);
+    depthImageMesh =
+            new Mesh(render, Mesh.PrimitiveMode.TRIANGLE_STRIP, /*indexBuffer=*/ null, depthImageVertexBuffers);
 
     // use occlusion
     occlusionShader =
@@ -126,7 +150,7 @@ public class BackgroundRenderer {
                       "shader/background_show_camera.vert",
                       "shader/background_show_camera.frag",
                       /*defines=*/ null)
-                      .setTexture("u_CameraColorTexture", cameraColorTexture)
+                      .setTexture("u_CpuImageTexture", cpuImageTexture)
                       .setDepthTest(false)
                       .setDepthWrite(false);
     }
@@ -143,30 +167,37 @@ public class BackgroundRenderer {
       frame.transformCoordinates2d(
               Coordinates2d.OPENGL_NORMALIZED_DEVICE_COORDINATES,
               NDC_QUAD_COORDS_BUFFER,
+              Coordinates2d.IMAGE_NORMALIZED,
+              cpuImageTexCoords);
+      cpuImageTexCoordsVertexBuffer.set(cpuImageTexCoords);
+
+      frame.transformCoordinates2d(
+              Coordinates2d.OPENGL_NORMALIZED_DEVICE_COORDINATES,
+              NDC_QUAD_COORDS_BUFFER,
               Coordinates2d.TEXTURE_NORMALIZED,
-              cameraTexCoords);
-      cameraTexCoordsVertexBuffer.set(cameraTexCoords);
+              depthImageTexCoords);
+      depthImageTexCoordsVertexBuffer.set(depthImageTexCoords);
     }
   }
 
   /**
    * Update depth texture with Image contents.
    */
-  public void updateCameraDepthTexture(Image image) {
-    // SampleRender abstraction leaks here
+  public void updateCameraDepthTexture(int width, int height, ShortBuffer buffer) {
+    // MyRender abstraction leaks here
     GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, cameraDepthTexture.getTextureId());
     GLES30.glTexImage2D(
             GLES30.GL_TEXTURE_2D,
             0,
             GLES30.GL_RG8,
-            image.getWidth(),
-            image.getHeight(),
+            width,
+            height,
             0,
             GLES30.GL_RG,
             GLES30.GL_UNSIGNED_BYTE,
-            image.getPlanes()[0].getBuffer());
+            buffer);
 
-    aspectRatio = (float) image.getWidth() / (float) image.getHeight();
+    aspectRatio = (float) width / (float) height;
     occlusionShader.setFloat("u_DepthAspectRatio", aspectRatio);
 
   }
@@ -178,7 +209,8 @@ public class BackgroundRenderer {
    * accurately follow static physical objects.
    */
   public void drawBackground(MyRender render) {
-    render.draw(mesh, backgroundShader);
+    if(!useDepthVisualization) render.draw(cpuImageMesh, backgroundShader);
+    else render.draw(depthImageMesh, backgroundShader);
   }
 
   /**
@@ -197,7 +229,7 @@ public class BackgroundRenderer {
             .setTexture("u_VirtualSceneDepthTexture", virtualSceneFramebuffer.getDepthTexture())
             .setFloat("u_ZNear", zNear)
             .setFloat("u_ZFar", zFar);
-    render.draw(mesh, occlusionShader);
+    render.draw(depthImageMesh, occlusionShader);
   }
 
   /**
@@ -212,5 +244,10 @@ public class BackgroundRenderer {
    */
   public Texture getCameraDepthTexture() {
     return cameraDepthTexture;
+  }
+
+  public void updateCpuImageTexture(Bitmap rgbFrameBitmap){
+    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, cpuImageTexture.getTextureId());
+    GLUtils.texImage2D(GLES30.GL_TEXTURE_2D,0,rgbFrameBitmap,0);
   }
 }

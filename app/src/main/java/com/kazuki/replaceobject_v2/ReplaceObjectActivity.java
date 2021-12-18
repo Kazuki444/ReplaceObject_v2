@@ -1,18 +1,24 @@
 package com.kazuki.replaceobject_v2;
 
-import androidx.annotation.NonNull;
-import androidx.appcompat.app.AppCompatActivity;
-
 import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.RectF;
 import android.media.Image;
 import android.opengl.GLSurfaceView;
 import android.opengl.Matrix;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.util.Log;
 import android.view.MotionEvent;
 import android.view.View;
 import android.widget.Switch;
 import android.widget.Toast;
+
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.AppCompatActivity;
 
 import com.google.ar.core.Anchor;
 import com.google.ar.core.ArCoreApk;
@@ -21,6 +27,7 @@ import com.google.ar.core.Config;
 import com.google.ar.core.DepthPoint;
 import com.google.ar.core.Frame;
 import com.google.ar.core.HitResult;
+import com.google.ar.core.ImageFormat;
 import com.google.ar.core.LightEstimate;
 import com.google.ar.core.Plane;
 import com.google.ar.core.Point;
@@ -37,15 +44,26 @@ import com.google.ar.core.exceptions.UnavailableUserDeclinedInstallationExceptio
 import com.kazuki.replaceobject_v2.helper.CameraPermissionHelper;
 import com.kazuki.replaceobject_v2.helper.DisplayRotationHelper;
 import com.kazuki.replaceobject_v2.helper.FullScreenHelper;
-import com.kazuki.replaceobject_v2.helper.ModelTableHelper;
 import com.kazuki.replaceobject_v2.helper.GestureHelper;
+import com.kazuki.replaceobject_v2.helper.ModelTableHelper;
 import com.kazuki.replaceobject_v2.helper.TrackingStateHelper;
 import com.kazuki.replaceobject_v2.myrender.BackgroundRenderer;
 import com.kazuki.replaceobject_v2.myrender.Framebuffer;
 import com.kazuki.replaceobject_v2.myrender.MyRender;
 import com.kazuki.replaceobject_v2.myrender.VirtualObjectRenderer;
 
+import org.tensorflow.lite.DataType;
+import org.tensorflow.lite.support.image.TensorImage;
+import org.tensorflow.lite.task.core.BaseOptions;
+import org.tensorflow.lite.task.core.vision.ImageProcessingOptions;
+import org.tensorflow.lite.task.vision.detector.Detection;
+import org.tensorflow.lite.task.vision.detector.ObjectDetector;
+
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.IntBuffer;
+import java.nio.ShortBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -57,6 +75,7 @@ import java.util.Map;
 public class ReplaceObjectActivity extends AppCompatActivity implements MyRender.Renderer {
   private static final String TAG = ReplaceObjectActivity.class.getSimpleName();
 
+  // Virtual Model
   private static final String MODEL_FILE_PATH = "model/";
   private static final String MODEL_TABLE = MODEL_FILE_PATH + "model_table.txt";
 
@@ -80,7 +99,9 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
 
   // UI
   private Switch showDepthMapSwitch;
+  private boolean isShowDepthMap = false;
   private Switch inpaintSwitch;
+  private boolean isInapint = false;
   private final ArrayList<View> ui = new ArrayList<>();
 
   private boolean installRequested;
@@ -92,13 +113,12 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
   private MyRender render;
 
   private BackgroundRenderer backgroundRenderer;
-  private boolean isShowDepthMap = false;
   private Framebuffer virtualSceneFramebuffer;
   private boolean hasSetTextureNames = false;
 
   // Virtual object
   private final Map<String, VirtualObjectRenderer> virtualObjectRenderers = new HashMap<>();
-  private final ArrayList<Anchor> anchors = new ArrayList<>();
+  private final ArrayList<Anchor> anchors = new ArrayList<>();  // This app track only one anchor.
 
   // Temporary matrix allocated here to reduce number of allocations for each frame.
   private final float[] modelMatrix = new float[16];
@@ -115,6 +135,16 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
   // from SelectItemActivity
   private String[] selectItems;
   private ModelTableHelper modelTableHelper;
+
+  // Object Detection
+  private ML ml = new ML();
+
+  // Inpaint cpu image and depth image.
+  private InpaintImage inpaintImage = new InpaintImage();
+
+  // Background texture date.
+  private BackgroundTextureData backgroundTextureData;
+  private boolean isInitBackgroundTextureDate = false;
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -134,6 +164,10 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
     // set up switch
     showDepthMapSwitch.setOnCheckedChangeListener((compoundButton, isChecked) -> {
       isShowDepthMap = isChecked ? true : false;
+    });
+    inpaintSwitch.setOnCheckedChangeListener((compoundButton, isChecked) -> {
+      isInapint = isChecked ? true : false;
+      clearAnchor();
     });
 
     // set up renderer
@@ -277,12 +311,19 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
       Log.e(TAG, "Failed to read a required asset file", e);
     }
 
+    // Initialization ObjectDetector.
+    try {
+      ml.initializeObjectDetector(this);
+    } catch (IOException e) {
+      Log.e(TAG, "Failed to read a required asset file", e);
+    }
   }
 
   @Override
   public void onSurfaceChanged(MyRender render, int width, int height) {
     displayRotationHelper.onSurfaceChanged(width, height);
     virtualSceneFramebuffer.resize(width, height);
+    ml.isDisplayRotate();
   }
 
   @Override
@@ -325,14 +366,55 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
     // used to draw the background camera image.
     backgroundRenderer.updateDisplayGeometry(frame);
 
-    if (camera.getTrackingState() == TrackingState.TRACKING) {
-      try (Image depthImage = frame.acquireDepthImage()) {
-        backgroundRenderer.updateCameraDepthTexture(depthImage);
-      } catch (NotYetAvailableException e) {
-        // This normally means that depth data is not available yet. This is normal so we will not
-        // spam the logcat with this.
+    if (camera.getTrackingState() != TrackingState.TRACKING) return;
+
+
+    // -- Object detection
+    try (Image cpuImage = frame.acquireCameraImage()) {
+      if (cpuImage.getFormat() != ImageFormat.YUV_420_888) {
+        throw new IllegalArgumentException(
+                "Expected image in YUV_420_88 format, got format " + cpuImage.getFormat());
       }
+      int cameraSensorToDisplayRotation =
+              displayRotationHelper.getCameraSensorToDisplayRotation(session.getCameraConfig().getCameraId());
+      ml.detect(cpuImage, cameraSensorToDisplayRotation);
+
+    } catch (NotYetAvailableException e) {
+      // This normally means that cpu image data is not available yet. This is normal so we will not
+      // spam the logcat with this.
     }
+    
+    // init background data
+    if (!isInitBackgroundTextureDate){
+      try{
+        backgroundTextureData = new BackgroundTextureData(frame);
+      }catch (NotYetAvailableException e){
+        return;
+      }
+      isInitBackgroundTextureDate=true;
+    }
+
+    // set background data
+    backgroundTextureData.set(frame);
+
+    // -- Inpaint ,if you need
+    if (ml.getResultNum() != 0 && isInapint && !isShowDepthMap) {
+      backgroundTextureData.inpaintDepthImage(ml.getLocation());
+      backgroundTextureData.inpaintCpuImage(ml.getLocation());
+    } else if (ml.getResultNum() != 0 && isInapint && isShowDepthMap) {
+      backgroundTextureData.inpaintDepthImage(ml.getLocation());
+    }
+
+    // update background data
+    backgroundTextureData.update(ml.getLocation(),ml.getResultNum());
+
+    // update background texture
+    backgroundRenderer.updateCpuImageTexture(backgroundTextureData.getCpuImageBitmap());
+    backgroundRenderer.updateCameraDepthTexture(
+            backgroundTextureData.getDepthImageWidth(),
+            backgroundTextureData.getDepthImageHeight(),
+            backgroundTextureData.getDepthImageBytes()
+    );
 
     // Handle one tap per frame.
     handleTap(frame, camera);
@@ -352,6 +434,9 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
     if (camera.getTrackingState() == TrackingState.PAUSED) {
       return;
     }
+
+    // If show depth map, don't draw 3D objects.
+    if (isShowDepthMap) return;
 
     // -- Draw occluded virtual objects
 
@@ -398,8 +483,6 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
 
     // Compose the virtual scene with the background.
     backgroundRenderer.drawVirtualScene(render, virtualSceneFramebuffer, Z_NEAR, Z_FAR);
-
-
   }
 
   /**
@@ -420,6 +503,7 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
 
   // Handle only one tap per frame, as taps are usually low frequency compared to frame rate.
   private void handleTap(Frame frame, Camera camera) {
+    if (isShowDepthMap) return;
     MotionEvent tap = gestureHelper.poll();
     if (tap != null && camera.getTrackingState() == TrackingState.TRACKING) {
       List<HitResult> hitResultList;
@@ -437,7 +521,7 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
                 || (trackable instanceof DepthPoint)) {
           // Cap the number of objects created. This avoids overloading both the
           // rendering system and ARCore.
-          if (anchors.size() >= 20) {
+          if (anchors.size() >= 1) {
             anchors.get(0).detach();
             anchors.remove(0);
           }
@@ -499,6 +583,13 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
     // Apply each factor to every component of each coefficient
     for (int i = 0; i < 9 * 3; ++i) {
       sphericalHarmonicsCoefficients[i] = coefficients[i] * sphericalHarmonicFactors[i / 3];
+    }
+  }
+
+  private void clearAnchor() {
+    if (anchors.size() != 0) {
+      anchors.get(0).detach();
+      anchors.remove(0);
     }
   }
 }
