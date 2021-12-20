@@ -139,8 +139,6 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
   // Object Detection
   private ML ml = new ML();
 
-  // Inpaint cpu image and depth image.
-  private InpaintImage inpaintImage = new InpaintImage();
 
   // Background texture date.
   private BackgroundTextureData backgroundTextureData;
@@ -370,13 +368,14 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
 
 
     // -- Object detection
+    int cameraSensorToDisplayRotation =
+            displayRotationHelper.getCameraSensorToDisplayRotation(session.getCameraConfig().getCameraId());
     try (Image cpuImage = frame.acquireCameraImage()) {
       if (cpuImage.getFormat() != ImageFormat.YUV_420_888) {
         throw new IllegalArgumentException(
                 "Expected image in YUV_420_88 format, got format " + cpuImage.getFormat());
       }
-      int cameraSensorToDisplayRotation =
-              displayRotationHelper.getCameraSensorToDisplayRotation(session.getCameraConfig().getCameraId());
+
       ml.detect(cpuImage, cameraSensorToDisplayRotation);
 
     } catch (NotYetAvailableException e) {
@@ -387,7 +386,7 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
     // init background data
     if (!isInitBackgroundTextureDate){
       try{
-        backgroundTextureData = new BackgroundTextureData(frame);
+        backgroundTextureData = new BackgroundTextureData(camera, frame);
       }catch (NotYetAvailableException e){
         return;
       }
@@ -399,10 +398,10 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
 
     // -- Inpaint ,if you need
     if (ml.getResultNum() != 0 && isInapint && !isShowDepthMap) {
-      backgroundTextureData.inpaintDepthImage(ml.getLocation());
-      backgroundTextureData.inpaintCpuImage(ml.getLocation());
+      backgroundTextureData.inpaintDepthImage(ml.getLocationIndex());
+      backgroundTextureData.inpaintCpuImage(ml.getLocationIndex());
     } else if (ml.getResultNum() != 0 && isInapint && isShowDepthMap) {
-      backgroundTextureData.inpaintDepthImage(ml.getLocation());
+      backgroundTextureData.inpaintDepthImage(ml.getLocationIndex());
     }
 
     // update background data

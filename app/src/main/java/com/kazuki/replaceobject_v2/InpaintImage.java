@@ -18,23 +18,50 @@ import java.nio.ShortBuffer;
 public final class InpaintImage {
   private static final String TAG = InpaintImage.class.getSimpleName();
 
-  private boolean isPrepareInpaintCpuImage = false;
-  private boolean isPrepareInpaintDepthImage = false;
+  // The parameters used for depth inpainting
+  private static final int THETA_SLICE = 90;
+  private static final int PHI_SLICE = 90;
+  private static final int CONFIDENCE_THRESHOLD = 255 - 128;
+  private static final int FREQUENCY_THRESHOLD = 5;
+  private static final int CORE_POINT_RADIUS = 2;
+  private static final int CORE_POINT_DIST = 10;
+  private static final int MASK_EXPAND = 10;
 
-  public void inpaintCpuImage(int[] rgbByte, int imageWidth, int imageHeight, RectF location) {
-    if(!isPrepareInpaintCpuImage) prepareInpaintCpuImage();
+  // Allocate memory
+  private final boolean[] depthMask;
+  private final float[] normalMap;
+  private final int[] hist = new int[THETA_SLICE * PHI_SLICE];
+  private final short[] clusterMap;
+
+  public InpaintImage(int[] depthImageSize) {
+    depthMask = new boolean[depthImageSize[0] * depthImageSize[1]];
+    normalMap = new float[depthImageSize[0] * depthImageSize[1] * 3];
+    clusterMap = new short[depthImageSize[0] * depthImageSize[1]];
   }
 
-  public void inpaintDepthImage(short[] depthArray,  int imageWidth, int imageHeight, RectF location) {
-    if(!isPrepareInpaintDepthImage) prepareInpaintDepthImage();
+  public void inpaintCpuImage(int[] rgbByte, int[] cpuImageSize, int[] location) {
+
   }
 
-  private void prepareInpaintCpuImage(){
-    isPrepareInpaintCpuImage = true;
-  }
+  public void inpaintDepthImage(
+          short[] depthArray, int[] depthImageSize,
+          int[] location, byte[] confidenceImageBytes,
+          float[] focalLength, float[] principalPoint) {
 
-  private void prepareInpaintDepthImage(){
-    isPrepareInpaintDepthImage=true;
+    // make depth mask
+    DepthImageUtils.makeMask(depthMask,confidenceImageBytes,depthImageSize,location,CONFIDENCE_THRESHOLD);
+
+    // make normal map
+    DepthImageUtils.makeNormalMap(normalMap,depthArray,depthMask,depthImageSize,focalLength);
+
+    // make cluster map and theta-phi-hist from normal map
+    DepthImageUtils.calcClusterMapAndHist(
+            clusterMap,hist,normalMap,depthMask,depthImageSize,THETA_SLICE,PHI_SLICE);
+
+    // clustering hist
+
+    // inpaint depth image
+
   }
 
 
