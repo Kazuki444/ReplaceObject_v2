@@ -366,6 +366,13 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
 
     if (camera.getTrackingState() != TrackingState.TRACKING) return;
 
+    // if images is not available, return.
+    try (Image cpuImage = frame.acquireCameraImage();
+         Image depthImage = frame.acquireDepthImage();
+         Image confidenceImage = frame.acquireRawDepthConfidenceImage()) {
+    } catch (NotYetAvailableException e) {
+      return;
+    }
 
     // -- Object detection
     int cameraSensorToDisplayRotation =
@@ -382,15 +389,15 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
       // This normally means that cpu image data is not available yet. This is normal so we will not
       // spam the logcat with this.
     }
-    
+
     // init background data
-    if (!isInitBackgroundTextureDate){
-      try{
+    if (!isInitBackgroundTextureDate) {
+      try {
         backgroundTextureData = new BackgroundTextureData(camera, frame);
-      }catch (NotYetAvailableException e){
+      } catch (NotYetAvailableException e) {
         return;
       }
-      isInitBackgroundTextureDate=true;
+      isInitBackgroundTextureDate = true;
     }
 
     // set background data
@@ -405,7 +412,7 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
     }
 
     // update background data
-    backgroundTextureData.update(ml.getLocation(),ml.getResultNum());
+    backgroundTextureData.update(ml.getLocation(), ml.getResultNum());
 
     // update background texture
     backgroundRenderer.updateCpuImageTexture(backgroundTextureData.getCpuImageBitmap());

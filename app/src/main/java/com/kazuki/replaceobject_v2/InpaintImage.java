@@ -14,6 +14,8 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.IntBuffer;
 import java.nio.ShortBuffer;
+import java.util.ArrayList;
+import java.util.Arrays;
 
 public final class InpaintImage {
   private static final String TAG = InpaintImage.class.getSimpleName();
@@ -21,7 +23,7 @@ public final class InpaintImage {
   // The parameters used for depth inpainting
   private static final int THETA_SLICE = 90;
   private static final int PHI_SLICE = 90;
-  private static final int CONFIDENCE_THRESHOLD = 255 - 128;
+  private static final int CONFIDENCE_THRESHOLD = 0;
   private static final int FREQUENCY_THRESHOLD = 5;
   private static final int CORE_POINT_RADIUS = 2;
   private static final int CORE_POINT_DIST = 10;
@@ -41,6 +43,7 @@ public final class InpaintImage {
 
   public void inpaintCpuImage(int[] rgbByte, int[] cpuImageSize, int[] location) {
 
+
   }
 
   public void inpaintDepthImage(
@@ -49,19 +52,34 @@ public final class InpaintImage {
           float[] focalLength, float[] principalPoint) {
 
     // make depth mask
-    DepthImageUtils.makeMask(depthMask,confidenceImageBytes,depthImageSize,location,CONFIDENCE_THRESHOLD);
+    Arrays.fill(depthMask, false);
+    DepthImageUtils.makeMask(depthMask, confidenceImageBytes, depthImageSize, location, CONFIDENCE_THRESHOLD);
+
+    /**
+     for (int y = 0; y < depthImageSize[1]; y++) {
+     for (int x = 0; x < depthImageSize[0]; x++) {
+     int position = depthImageSize[0] * y + x;
+     if (depthMask[position]) depthArray[position] = 5000;
+     }
+
+     }*/
 
     // make normal map
-    DepthImageUtils.makeNormalMap(normalMap,depthArray,depthMask,depthImageSize,focalLength);
+    Arrays.fill(normalMap, 0f);
+    DepthImageUtils.makeNormalMap(normalMap, depthArray, depthMask, depthImageSize, focalLength);
 
     // make cluster map and theta-phi-hist from normal map
-    DepthImageUtils.calcClusterMapAndHist(
-            clusterMap,hist,normalMap,depthMask,depthImageSize,THETA_SLICE,PHI_SLICE);
+    Arrays.fill(hist, 0);
+    Arrays.fill(clusterMap, (short) 0);
+    DepthImageUtils.calcClusterMapAndHist(clusterMap, hist, normalMap, depthMask, depthImageSize, THETA_SLICE, PHI_SLICE);
 
     // clustering hist
+    ArrayList<int[]> clusterList = DepthImageUtils.quoits(hist, THETA_SLICE, PHI_SLICE, CORE_POINT_RADIUS, FREQUENCY_THRESHOLD, CORE_POINT_DIST);
 
     // inpaint depth image
-
+    if (clusterList != null) {
+      DepthImageUtils.inpaintDepthArray(depthArray, depthMask, clusterMap, clusterList, location, focalLength, principalPoint, depthImageSize, MASK_EXPAND);
+    }
   }
 
 

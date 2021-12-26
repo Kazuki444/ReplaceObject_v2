@@ -62,7 +62,7 @@ vec3 Depth_GetColorVisualization(float x) {
 }
 
 void main() {
-  const highp float kMaxDepth = 8000.0;  // In millimeters.
+  const highp float kMaxDepth = 2500.0;  // In millimeters.
   highp float depth =
       Depth_GetCameraDepthInMillimeters(u_CameraDepthTexture, v_CameraTexCoord);
   highp float normalizedDepth = clamp(depth / kMaxDepth, 0.0, 1.0);

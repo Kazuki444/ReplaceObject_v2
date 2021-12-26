@@ -16,6 +16,7 @@ import com.google.ar.core.exceptions.NotYetAvailableException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.ShortBuffer;
+import java.util.Arrays;
 
 public class BackgroundTextureData {
   private static final String TAG = BackgroundTextureData.class.getSimpleName();
@@ -30,6 +31,8 @@ public class BackgroundTextureData {
   private final int[] depthImageSize = new int[2];  // The order of values is {width, height}.
   private short[] depthArray;
   private ShortBuffer depthImageBytes;
+  private final int[] depthImageLocation = new int[4];  // The order of values is {left, top, right, bottom}.
+  private final float[] ratioCpu2Depth = new float[4];  // The order of values is {ratioX, ratioY}.
 
   // confidence image
   private byte[] confidenceImageBytes;
@@ -58,6 +61,8 @@ public class BackgroundTextureData {
     depthImageSize[1] = depthImage.getHeight();
     depthImageBytes = ShortBuffer.allocate(depthImageSize[0] * depthImageSize[1]);
     depthArray = new short[depthImageSize[0] * depthImageSize[1]];
+    ratioCpu2Depth[0] = (float) depthImageSize[0] / cpuImageSize[0];
+    ratioCpu2Depth[1] = (float) depthImageSize[1] / 360;
 
     Image confidenceImage = frame.acquireRawDepthConfidenceImage();
     confidenceImageBytes = new byte[depthImageSize[0] * depthImageSize[1]];
@@ -137,7 +142,25 @@ public class BackgroundTextureData {
   }
 
   public void inpaintDepthImage(int[] location) {
-    inpaintImage.inpaintDepthImage(depthArray, depthImageSize, location, confidenceImageBytes, focalLength, principalPoint);
+    int top = cropLocationY(location[1]);
+    int bottom = cropLocationY(location[3]);
+    depthImageLocation[0] = (int) (location[0] * ratioCpu2Depth[0] - 2);
+    depthImageLocation[1] = (int) (top * ratioCpu2Depth[1] - 2);
+    depthImageLocation[2] = (int) (location[2] * ratioCpu2Depth[0] + 1);
+    depthImageLocation[3] = (int) (bottom * ratioCpu2Depth[1] + 1);
+
+    depthImageLocation[0] = depthImageLocation[0] < 0 ? 0 : depthImageLocation[0];
+    depthImageLocation[1] = depthImageLocation[1] < 0 ? 0 : depthImageLocation[1];
+    depthImageLocation[2] = depthImageLocation[2] > depthImageSize[0] - 1 ? depthImageSize[0] - 1 : depthImageLocation[2];
+    depthImageLocation[3] = depthImageLocation[3] > depthImageSize[1] - 1 ? depthImageSize[1] - 1 : depthImageLocation[3];
+
+    inpaintImage.inpaintDepthImage(depthArray, depthImageSize, depthImageLocation, confidenceImageBytes, focalLength, principalPoint);
+  }
+
+  private int cropLocationY(int y) {
+    if (y < 60) return 0;
+    else if(60<=y&&y<=360) return y-60;
+    else return 360;
   }
 
   public Bitmap getCpuImageBitmap() {

@@ -13,22 +13,18 @@ public class DepthImageUtils {
 
   public static void makeMask(boolean[] mask, byte[] confidenceBytes,
                               int[] size, int[] locationIndex, int confThreshold) {
-    int i = 0;
-    for (byte conf : confidenceBytes) {
-      if (conf < confThreshold) {
-        mask[i++] = true;
-        continue;
+    for (int y = 0; y < size[1]; y++) {
+      for (int x = 0; x < size[0]; x++) {
+        int position = y * size[0] + x;
+        if (confidenceBytes[position] != -1) {
+          mask[position] = true;
+          continue;
+        }
+        if (locationIndex[1] <= y && y <= locationIndex[3]
+                && locationIndex[0] <= x && x <= locationIndex[2]) {
+          mask[position] = true;
+        }
       }
-
-      int y = i / size[0];
-      int x = i % size[0];
-      if (locationIndex[1] <= y && y <= locationIndex[3]
-              && locationIndex[0] <= x && x <= locationIndex[2]) {
-        mask[i++] = true;
-        continue;
-      }
-
-      i += 1;
     }
   }
 
@@ -79,21 +75,36 @@ public class DepthImageUtils {
     }
     Collections.sort(candidates, Collections.reverseOrder());
 
-    Map<Integer, int[]> corePoints = new HashMap<>();
+    Map<Integer, ArrayList<Integer>> corePoints = new HashMap<>();
     int toCluster = (int) (Math.pow(2, clusterDigit)) - 1;
     for (int candidate : candidates) {
       int corePoint = candidate & toCluster;
       if (hist[corePoint] != 0) {
-        int[] belongCluster = findBelongCluster(
-                hist, thetaSlice, phiSlice, corePointRadius, frequencyThreshold, corePointDist);
+        ArrayList<Integer> belongCluster = findBelongCluster(hist, corePoint, corePointRadius, frequencyThreshold, thetaSlice, phiSlice);
         corePoints.put(corePoint, belongCluster);
       }
     }
 
+    if (corePoints.size() == 0) return null;
 
+    ArrayList<int[]> clusterList = mergeCorePoint(corePoints, corePointDist, thetaSlice);
 
+    return clusterList.size() != 0 ? clusterList : null;
   }
 
+  public static void inpaintDepthArray(
+          short[] depthArray, boolean[] mask, short[] clusterMap, ArrayList<int[]> clusterList,
+          int[] location, float[] focalLength, float[] principalPoint, int[] size, int expand) {
+    float[][] planes = estimatePlanes(depthArray, mask, focalLength, principalPoint, location, size, clusterMap, clusterList, expand);
+    for (int y = location[1]; y < location[3] + 1; y++) {
+      for (int x = location[0]; x < location[2] + 1; x++) {
+        int position = y * size[0] + x;
+        short originalZ = depthArray[position];
+        depthArray[position] = inpaintDepth(originalZ, x, y, planes, focalLength, principalPoint);
+      }
+    }
+
+  }
 
   /****************************************************/
 
@@ -152,11 +163,10 @@ public class DepthImageUtils {
     return histY * thetaSlice + histX;
   }
 
-  public static int[] findBelongCluster(
+  public static ArrayList<Integer> findBelongCluster(
           int[] hist, int corePoint, int corePointRadius, int frequencyThreshold,
           int thetaSlice, int phiSlice) {
-    int[] belongCluster = new int[(2 * corePointRadius + 1) * (2 * corePointRadius + 1)];
-    int position = 0;
+    ArrayList<Integer> belongCluster = new ArrayList<>();
     int[] radian = new int[2];
 
     cluster2radian(radian, corePoint, thetaSlice);
@@ -165,13 +175,12 @@ public class DepthImageUtils {
       for (int x = radian[0] - corePointRadius; x < radian[0] + corePointRadius + 1; x++) {
         if (x < 0 || thetaSlice - 1 < x) continue;
         int cluster = y * thetaSlice + x;
-        if (hist[cluster] >= frequencyThreshold) belongCluster[position++] = cluster;
+        if (hist[cluster] >= frequencyThreshold) belongCluster.add(cluster);
         hist[cluster] = 0;
       }
     }
 
-    int[] array = Arrays.copyOfRange(belongCluster,0,position+1);
-    return array;
+    return belongCluster;
   }
 
   public static void cluster2radian(int[] dst, int cluster, int thetaSlice) {
@@ -179,13 +188,200 @@ public class DepthImageUtils {
     dst[1] = cluster / thetaSlice;  // phi
   }
 
-  public static ArrayList<int[]> mergeCorePoint(Map<Integer,int[]> corePoints, int corePointDist, int thetaSlice){
+  public static ArrayList<int[]> mergeCorePoint(Map<Integer, ArrayList<Integer>> corePoints, int corePointDist, int thetaSlice) {
 
     ArrayList<Integer> points = new ArrayList<>(corePoints.keySet());
-    int pointNum=points.size();
-    int dist = corePointDist*corePointDist;
+    int pointNum = points.size();
+    int dist = corePointDist * corePointDist;
 
-    Map<Integer, int[]> adjList=new HashMap<>();
+    Map<Integer, ArrayList<Integer>> adjList = new HashMap<>();
+    int[] radian0 = new int[2];
+    int[] radian1 = new int[2];
+    for (int key : points) {
+      ArrayList<Integer> list = new ArrayList<>();
+      adjList.put(key, list);
+    }
+    for (int i = 0; i < pointNum - 1; i++) {
+      cluster2radian(radian0, points.get(i), thetaSlice);
+      for (int j = i + 1; j < pointNum; j++) {
+        cluster2radian(radian1, points.get(j), thetaSlice);
+        int dTheta = radian0[0] - radian1[0];
+        int dPhi = radian0[1] - radian1[1];
+        int d = dTheta * dTheta + dPhi * dPhi;
+        if (d < dist) {
+          adjList.get(points.get(i)).add(points.get(j));
+          adjList.get(points.get(j)).add(points.get(i));
+        }
+      }
+    }
+
+    boolean[] f = new boolean[pointNum];
+
+    ArrayList<ArrayList<Integer>> mergedPoints = new ArrayList<>();
+    for (int point : points) {
+      ArrayList<Integer> cluster = new ArrayList<>();
+      dfs(point, points, adjList, f, cluster);
+      if (cluster.size() > 0) mergedPoints.add(cluster);
+    }
+
+    ArrayList<int[]> clusterList = new ArrayList<>();
+    for (ArrayList<Integer> ps : mergedPoints) {
+      ArrayList<Integer> indexList = new ArrayList<>();
+      for (int key : ps) {
+        indexList.addAll(corePoints.get(key));
+      }
+      clusterList.add(toPrimitive(indexList));
+    }
+
+    return clusterList;
   }
 
+
+  public static void dfs(int point, ArrayList<Integer> points, Map<Integer, ArrayList<Integer>> adjList,
+                         boolean[] f, ArrayList<Integer> cluster) {
+    int i = points.indexOf(point);
+    if (!f[i]) {
+      f[i] = true;
+      cluster.add(point);
+      for (int p : adjList.get(point)) {
+        int j = points.indexOf(p);
+        if (!f[j]) dfs(p, points, adjList, f, cluster);
+      }
+    }
+  }
+
+  public static float[][] estimatePlanes(
+          short[] depthArray, boolean[] mask, float[] focalLength, float[] principalPoint,
+          int[] location, int[] size, short[] clusterMap, ArrayList<int[]> clusterList, int expand) {
+    int clusterNum = clusterList.size();
+    int[] clustersCount = new int[clusterNum];
+    float[][] clustersElementSum = new float[clusterNum][8]; //[x, y, z, xx, yy, xy, yz, zx]
+
+    for (int[] list : clusterList) Arrays.sort(list);
+
+    boolean[] exist = new boolean[1];
+    int[] clusterIndex = new int[1];
+    for (int y = 0; y < size[1]; y++) {
+      for (int x = 0; x < size[0]; x++) {
+        int position = y * size[0] + x;
+        if (mask[position]) continue;
+
+        if (location[1] - expand <= y && y <= location[3] + expand
+                && location[0] - expand <= x && x <= location[2] + expand) {
+          continue;
+        }
+
+        exist[0] = false;
+        clusterIndex[0] = 0;
+        binarySearch(exist, clusterIndex, clusterList, clusterMap[position]);
+
+        if (exist[0]) {
+          clustersCount[clusterIndex[0]] += 1;
+          calcClusterElementSum(clustersElementSum, clusterIndex[0], depthArray[position], x, y, focalLength, principalPoint);
+        }
+      }
+    }
+
+    float[][] param = new float[clusterNum][3];
+    calcPlaneParam(param, clustersElementSum, clustersCount, clusterNum);
+
+    return param;
+  }
+
+  public static void binarySearch(boolean[] exist, int[] clusterIndex, ArrayList<int[]> clusterList, short findElement) {
+    for (int[] cluster : clusterList) {
+      if (findElement < cluster[0] || cluster[cluster.length - 1] < findElement) {
+        clusterIndex[0] += 1;
+        continue;
+      }
+
+      int left = 0;
+      int mid = 0;
+      int right = cluster.length;
+      while (left < right) {
+        mid = (int) ((left + right) * 0.5);
+        if (findElement == cluster[mid]) {
+          exist[0] = true;
+          break;
+        }
+        if (findElement < cluster[mid]) right = mid;
+        if (findElement > cluster[mid]) left = mid + 1;
+      }
+
+      if (exist[0]) break;
+
+      clusterIndex[0] += 1;
+    }
+  }
+
+  public static void calcClusterElementSum(
+          float[][] clustersElementSum, int clusterIndex, short depth, int xIndex, int yIndex,
+          float[] focalLength, float[] principalPoint) {
+    float cameraSpacePointX = depth * (xIndex - principalPoint[0]) / focalLength[0];
+    float cameraSpacePointY = depth * (yIndex - principalPoint[1]) / focalLength[1];
+    float cameraSpacePointZ = (float) depth;
+    clustersElementSum[clusterIndex][0] += cameraSpacePointX;
+    clustersElementSum[clusterIndex][1] += cameraSpacePointY;
+    clustersElementSum[clusterIndex][2] += cameraSpacePointZ;
+    clustersElementSum[clusterIndex][3] += cameraSpacePointX * cameraSpacePointX;
+    clustersElementSum[clusterIndex][4] += cameraSpacePointY * cameraSpacePointY;
+    clustersElementSum[clusterIndex][5] += cameraSpacePointX * cameraSpacePointY;
+    clustersElementSum[clusterIndex][6] += cameraSpacePointY * cameraSpacePointZ;
+    clustersElementSum[clusterIndex][7] += cameraSpacePointZ * cameraSpacePointX;
+  }
+
+  public static void calcPlaneParam(
+          float[][] param, float[][] clustersElementSum, int[] clustersCount, int clusterNum) {
+    for (int i = 0; i < clusterNum; i++) {
+      int num = clustersCount[i];
+      float averageX = clustersElementSum[i][0] / num;
+      float averageY = clustersElementSum[i][1] / num;
+      float averageZ = clustersElementSum[i][2] / num;
+      float varianceXX = clustersElementSum[i][3] / num - averageX * averageX;
+      float varianceYY = clustersElementSum[i][4] / num - averageY * averageY;
+      float varianceXY = clustersElementSum[i][5] / num - averageX * averageY;
+      float varianceYZ = clustersElementSum[i][6] / num - averageY * averageZ;
+      float varianceZX = clustersElementSum[i][7] / num - averageZ * averageX;
+
+      float b = (varianceZX * varianceYY - varianceXY * varianceYZ) / (varianceXX * varianceYY - varianceXY * varianceXY);
+      float c = (varianceXX * varianceYZ - varianceXY * varianceZX) / (varianceXX * varianceYY - varianceXY * varianceXY);
+      float a = -b * averageX - c * averageY + averageZ;
+
+      param[i][0] = a;
+      param[i][1] = b;
+      param[i][2] = c;
+    }
+  }
+
+  public static short inpaintDepth(
+          short originalZ, int xIndex, int yIndex, float[][] planes,
+          float[] focalLength, float[] principalPoint) {
+    float inpaintZ = 8000;
+
+    for (float[] plane : planes) {
+      float ff = focalLength[0] * focalLength[1];
+      float a = plane[0];
+      float xcx = xIndex - principalPoint[0];
+      float bfy = plane[1] * focalLength[1];
+      float ycy = yIndex - principalPoint[1];
+      float cfx = plane[2] * focalLength[0];
+      float z = -a * ff / (-ff + xcx * bfy + ycy * cfx);
+
+      float error = 300f;
+      if (z > originalZ - error) {
+        if (z < inpaintZ) {
+          inpaintZ = z;
+        }
+      }
+    }
+
+    return (short) inpaintZ;
+  }
+
+  /*******************************************************************/
+  public static int[] toPrimitive(ArrayList<Integer> list) {
+    final int[] result = new int[list.size()];
+    for (int i = 0; i < result.length; i++) result[i] = list.get(i);
+    return result;
+  }
 }
