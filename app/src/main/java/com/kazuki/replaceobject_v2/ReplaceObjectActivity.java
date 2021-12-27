@@ -31,6 +31,7 @@ import com.google.ar.core.ImageFormat;
 import com.google.ar.core.LightEstimate;
 import com.google.ar.core.Plane;
 import com.google.ar.core.Point;
+import com.google.ar.core.Pose;
 import com.google.ar.core.Session;
 import com.google.ar.core.Trackable;
 import com.google.ar.core.TrackingState;
@@ -139,12 +140,13 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
   // Object Detection
   private ML ml = new ML();
 
-  // Inpaint cpu image and depth image.
-  private InpaintImage inpaintImage = new InpaintImage();
 
   // Background texture date.
   private BackgroundTextureData backgroundTextureData;
   private boolean isInitBackgroundTextureDate = false;
+
+  // screen size
+  private final int[] screenSize = new int[2];
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -324,6 +326,10 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
     displayRotationHelper.onSurfaceChanged(width, height);
     virtualSceneFramebuffer.resize(width, height);
     ml.isDisplayRotate();
+
+    // set screen size
+    screenSize[0] = width;
+    screenSize[1] = height;
   }
 
   @Override
@@ -368,30 +374,38 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
 
     if (camera.getTrackingState() != TrackingState.TRACKING) return;
 
+    // if images is not available, return.
+    try (Image cpuImage = frame.acquireCameraImage();
+         Image depthImage = frame.acquireDepthImage();
+         Image confidenceImage = frame.acquireRawDepthConfidenceImage()) {
+    } catch (NotYetAvailableException e) {
+      return;
+    }
 
     // -- Object detection
+    int cameraSensorToDisplayRotation =
+            displayRotationHelper.getCameraSensorToDisplayRotation(session.getCameraConfig().getCameraId());
     try (Image cpuImage = frame.acquireCameraImage()) {
       if (cpuImage.getFormat() != ImageFormat.YUV_420_888) {
         throw new IllegalArgumentException(
                 "Expected image in YUV_420_88 format, got format " + cpuImage.getFormat());
       }
-      int cameraSensorToDisplayRotation =
-              displayRotationHelper.getCameraSensorToDisplayRotation(session.getCameraConfig().getCameraId());
+
       ml.detect(cpuImage, cameraSensorToDisplayRotation);
 
     } catch (NotYetAvailableException e) {
       // This normally means that cpu image data is not available yet. This is normal so we will not
       // spam the logcat with this.
     }
-    
+
     // init background data
-    if (!isInitBackgroundTextureDate){
-      try{
-        backgroundTextureData = new BackgroundTextureData(frame);
-      }catch (NotYetAvailableException e){
+    if (!isInitBackgroundTextureDate) {
+      try {
+        backgroundTextureData = new BackgroundTextureData(camera, frame);
+      } catch (NotYetAvailableException e) {
         return;
       }
-      isInitBackgroundTextureDate=true;
+      isInitBackgroundTextureDate = true;
     }
 
     // set background data
@@ -399,14 +413,14 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
 
     // -- Inpaint ,if you need
     if (ml.getResultNum() != 0 && isInapint && !isShowDepthMap) {
-      backgroundTextureData.inpaintDepthImage(ml.getLocation());
-      backgroundTextureData.inpaintCpuImage(ml.getLocation());
+      backgroundTextureData.inpaintDepthImage(ml.getLocationIndex());
+      backgroundTextureData.inpaintCpuImage(ml.getLocationIndex());
     } else if (ml.getResultNum() != 0 && isInapint && isShowDepthMap) {
-      backgroundTextureData.inpaintDepthImage(ml.getLocation());
+      backgroundTextureData.inpaintDepthImage(ml.getLocationIndex());
     }
 
     // update background data
-    backgroundTextureData.update(ml.getLocation(),ml.getResultNum());
+    backgroundTextureData.update(ml.getLocation(), ml.getResultNum());
 
     // update background texture
     backgroundRenderer.updateCpuImageTexture(backgroundTextureData.getCpuImageBitmap());
@@ -474,9 +488,12 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
 
       // Update shader properties and draw
       virtualObjectRenderers.forEach((className, virtualObjectRenderer) -> {
-        virtualObjectRenderer.updateModelView(modelViewMatrix, modelViewProjectionMatrix);
-        render.draw(virtualObjectRenderer.getVirtualObjectMesh(),
-                virtualObjectRenderer.getVirtualObjectShader(), virtualSceneFramebuffer);
+        if (ml.getConfidence() > 0.6 && className.equals(ml.getLabel())) {
+          virtualObjectRenderer.updateModelView(modelViewMatrix, modelViewProjectionMatrix);
+          render.draw(virtualObjectRenderer.getVirtualObjectMesh(),
+                  virtualObjectRenderer.getVirtualObjectShader(), virtualSceneFramebuffer);
+        }
+
       });
 
     }
@@ -506,37 +523,45 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
     if (isShowDepthMap) return;
     MotionEvent tap = gestureHelper.poll();
     if (tap != null && camera.getTrackingState() == TrackingState.TRACKING) {
-      List<HitResult> hitResultList;
-      hitResultList = frame.hitTest(tap);
-      for (HitResult hit : hitResultList) {
-        // If any plane, Oriented Point, or Instant Placement Point was hit, create an anchor.
-        Trackable trackable = hit.getTrackable();
-        // If a plane was hit, check that it was hit inside the plane polygon.
-        // DepthPoints are only returned if Config.DepthMode is set to AUTOMATIC.
-        if ((trackable instanceof Plane
-                && ((Plane) trackable).isPoseInPolygon(hit.getHitPose()))
-                || (trackable instanceof Point
-                && ((Point) trackable).getOrientationMode()
-                == Point.OrientationMode.ESTIMATED_SURFACE_NORMAL)
-                || (trackable instanceof DepthPoint)) {
-          // Cap the number of objects created. This avoids overloading both the
-          // rendering system and ARCore.
-          if (anchors.size() >= 1) {
-            anchors.get(0).detach();
-            anchors.remove(0);
-          }
-
-          // Adding an Anchor tells ARCore that it should track this position in
-          // space. This anchor is created on the Plane to place the 3D model
-          // in the correct position relative both to the world and to the plane.
-          anchors.add(hit.createAnchor());
-
-          // Hits are sorted by depth. Consider only closest hit on a plane, Oriented Point, or
-          // Instant Placement Point.
-          break;
-        }
+      // Cap the number of objects created. This avoids overloading both the rendering system and ARCore.
+      if (anchors.size() >= 1) {
+        anchors.get(0).detach();
+        anchors.remove(0);
       }
+
+      float[] screenUV = calcScreenUV(tap);
+      Pose pose = backgroundTextureData.createAnchorFromTap(camera, screenUV);
+      if (pose == null) return;
+      anchors.add(session.createAnchor(pose));
+
+      /***************/
+
     }
+  }
+
+  private float[] calcScreenUV(MotionEvent tap) {
+    int cameraSensorToDisplayRotation =
+            displayRotationHelper.getCameraSensorToDisplayRotation(session.getCameraConfig().getCameraId());
+    float[] screenUV = new float[2];
+    switch (cameraSensorToDisplayRotation) {
+      case 0:
+        screenUV[0] = tap.getX() / screenSize[0];
+        screenUV[1] = tap.getY() / screenSize[1];
+        break;
+      case 90:
+        screenUV[0] = tap.getY() / screenSize[1];
+        screenUV[1] = (screenSize[0] - tap.getX()) / screenSize[0];
+        break;
+      case 180:
+        screenUV[0] = (screenSize[0] - tap.getX()) / screenSize[0];
+        screenUV[1] = (screenSize[1] - tap.getY()) / screenSize[1];
+        break;
+      case 270:
+        screenUV[0] = (screenSize[1] - tap.getY()) / screenSize[1];
+        screenUV[1] = tap.getX() / screenSize[0];
+        break;
+    }
+    return screenUV;
   }
 
   /**

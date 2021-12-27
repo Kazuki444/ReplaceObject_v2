@@ -75,6 +75,6 @@ book:cube.obj:cube_albedo.png:cube_pbr.png
 clock:cube.obj:cube_albedo.png:cube_pbr.png
 vase:cube.obj:cube_albedo.png:cube_pbr.png
 scissors:cube.obj:cube_albedo.png:cube_pbr.png
-teddy bear:cube.obj:cube_albedo.png:cube_pbr.png
+teddy bear:pawn.obj:pawn_albedo.png:pawn_pbr.png
 hair drier:cube.obj:cube_albedo.png:cube_pbr.png
 toothbrush:cube.obj:cube_albedo.png:cube_pbr.png
