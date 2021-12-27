@@ -32,8 +32,8 @@ public final class ModelTableHelper {
       String[] fileNames;
       String line;
       String key;
-      String[] values = new String[3];
       while ((line = reader.readLine()) != null){
+        String[] values = new String[3];
         fileNames = line.split(":");
         key = fileNames[0];
         values[0] = fileNames[1];

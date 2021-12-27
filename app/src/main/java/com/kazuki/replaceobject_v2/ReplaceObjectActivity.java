@@ -488,9 +488,12 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
 
       // Update shader properties and draw
       virtualObjectRenderers.forEach((className, virtualObjectRenderer) -> {
-        virtualObjectRenderer.updateModelView(modelViewMatrix, modelViewProjectionMatrix);
-        render.draw(virtualObjectRenderer.getVirtualObjectMesh(),
-                virtualObjectRenderer.getVirtualObjectShader(), virtualSceneFramebuffer);
+        if (ml.getConfidence() > 0.6 && className.equals(ml.getLabel())) {
+          virtualObjectRenderer.updateModelView(modelViewMatrix, modelViewProjectionMatrix);
+          render.draw(virtualObjectRenderer.getVirtualObjectMesh(),
+                  virtualObjectRenderer.getVirtualObjectShader(), virtualSceneFramebuffer);
+        }
+
       });
 
     }
