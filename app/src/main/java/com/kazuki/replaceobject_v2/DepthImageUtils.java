@@ -96,11 +96,26 @@ public class DepthImageUtils {
           short[] depthArray, boolean[] mask, short[] clusterMap, ArrayList<int[]> clusterList,
           int[] location, float[] focalLength, float[] principalPoint, int[] size, int expand) {
     float[][] planes = estimatePlanes(depthArray, mask, focalLength, principalPoint, location, size, clusterMap, clusterList, expand);
-    for (int y = location[1]; y < location[3] + 1; y++) {
-      for (int x = location[0]; x < location[2] + 1; x++) {
+    /**
+     for (int y = location[1]; y < location[3] + 1; y++) {
+     for (int x = location[0]; x < location[2] + 1; x++) {
+     int position = y * size[0] + x;
+     short originalZ = depthArray[position];
+     depthArray[position] = inpaintDepth(originalZ, x, y, planes, focalLength, principalPoint, clusterMap);
+     }
+     }*/
+    Arrays.fill(clusterMap, (short) -1);
+    for (int y = 0; y < size[1]; y++) {
+      for (int x = 0; x < size[0]; x++) {
         int position = y * size[0] + x;
         short originalZ = depthArray[position];
-        depthArray[position] = inpaintDepth(originalZ, x, y, planes, focalLength, principalPoint);
+        if (location[1] <= y && y <= location[3] && location[0] <= x && x <= location[2]) {
+          depthArray[position] = inpaintDepth(originalZ, x, y, planes, focalLength, principalPoint);
+          clusterMap[position] = whichPlane(originalZ, x, y, planes, focalLength, principalPoint);
+        } else if (mask[position]) {
+          continue;
+        }
+        clusterMap[position] = whichPlane(originalZ, x, y, planes, focalLength, principalPoint);
       }
     }
 
@@ -376,6 +391,36 @@ public class DepthImageUtils {
     }
 
     return (short) inpaintZ;
+  }
+
+  public static short whichPlane(
+          short originalZ, int xIndex, int yIndex, float[][] planes,
+          float[] focalLength, float[] principalPoint) {
+    float inpaintZ = 8000;
+    short planeIndex = -1;
+
+    short index = 0;
+    for (float[] plane : planes) {
+      float ff = focalLength[0] * focalLength[1];
+      float a = plane[0];
+      float xcx = xIndex - principalPoint[0];
+      float bfy = plane[1] * focalLength[1];
+      float ycy = yIndex - principalPoint[1];
+      float cfx = plane[2] * focalLength[0];
+      float z = -a * ff / (-ff + xcx * bfy + ycy * cfx);
+
+      float error = 300f;
+      if (z > originalZ - error) {
+        if (z < inpaintZ) {
+          inpaintZ = z;
+          planeIndex=index;
+        }
+      }
+
+      index+=1;
+    }
+
+    return planeIndex;
   }
 
   /*******************************************************************/

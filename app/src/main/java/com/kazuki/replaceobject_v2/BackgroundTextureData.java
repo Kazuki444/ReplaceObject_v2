@@ -138,14 +138,14 @@ public class BackgroundTextureData {
   }
 
   public void inpaintCpuImage(int[] location) {
-    inpaintImage.inpaintCpuImage(cpuImageBytes, cpuImageSize, location);
+    inpaintImage.inpaintCpuImage(cpuImageBytes, cpuImageSize, location, depthImageSize, depthImageLocation);
   }
 
   public void inpaintDepthImage(int[] location) {
     int top = cropLocationY(location[1]);
     int bottom = cropLocationY(location[3]);
-    depthImageLocation[0] = (int) (location[0] * ratioCpu2Depth[0] - 2);
-    depthImageLocation[1] = (int) (top * ratioCpu2Depth[1] - 2);
+    depthImageLocation[0] = (int) (location[0] * ratioCpu2Depth[0] - 1);
+    depthImageLocation[1] = (int) (top * ratioCpu2Depth[1] - 1);
     depthImageLocation[2] = (int) (location[2] * ratioCpu2Depth[0] + 1);
     depthImageLocation[3] = (int) (bottom * ratioCpu2Depth[1] + 1);
 
@@ -159,7 +159,7 @@ public class BackgroundTextureData {
 
   private int cropLocationY(int y) {
     if (y < 60) return 0;
-    else if(60<=y&&y<=360) return y-60;
+    else if (60 <= y && y <= 360) return y - 60;
     else return 360;
   }
 

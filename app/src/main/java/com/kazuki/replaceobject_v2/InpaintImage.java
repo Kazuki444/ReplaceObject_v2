@@ -35,15 +35,17 @@ public final class InpaintImage {
   private final int[] hist = new int[THETA_SLICE * PHI_SLICE];
   private final short[] clusterMap;
 
+  private int planeNum = 0;
+
   public InpaintImage(int[] depthImageSize) {
     depthMask = new boolean[depthImageSize[0] * depthImageSize[1]];
     normalMap = new float[depthImageSize[0] * depthImageSize[1] * 3];
     clusterMap = new short[depthImageSize[0] * depthImageSize[1]];
   }
 
-  public void inpaintCpuImage(int[] rgbByte, int[] cpuImageSize, int[] location) {
-
-
+  public void inpaintCpuImage(int[] rgbByte, int[] cpuImageSize, int[] cpuImageLocation, int[] depthImageSize, int[] depthImageLocation) {
+    if (planeNum != 0)
+      ImageUtils.inpaintCpuImage(clusterMap, depthImageSize, planeNum, depthImageLocation, rgbByte, cpuImageSize, cpuImageLocation);
   }
 
   public void inpaintDepthImage(
@@ -74,11 +76,13 @@ public final class InpaintImage {
     DepthImageUtils.calcClusterMapAndHist(clusterMap, hist, normalMap, depthMask, depthImageSize, THETA_SLICE, PHI_SLICE);
 
     // clustering hist
+    planeNum = 0;
     ArrayList<int[]> clusterList = DepthImageUtils.quoits(hist, THETA_SLICE, PHI_SLICE, CORE_POINT_RADIUS, FREQUENCY_THRESHOLD, CORE_POINT_DIST);
 
     // inpaint depth image
     if (clusterList != null) {
       DepthImageUtils.inpaintDepthArray(depthArray, depthMask, clusterMap, clusterList, location, focalLength, principalPoint, depthImageSize, MASK_EXPAND);
+      planeNum = clusterList.size();
     }
   }
 
