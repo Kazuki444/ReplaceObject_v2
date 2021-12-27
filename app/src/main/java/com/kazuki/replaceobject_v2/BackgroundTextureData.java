@@ -11,6 +11,7 @@ import android.util.Log;
 import com.google.ar.core.Camera;
 import com.google.ar.core.CameraIntrinsics;
 import com.google.ar.core.Frame;
+import com.google.ar.core.Pose;
 import com.google.ar.core.exceptions.NotYetAvailableException;
 
 import java.nio.ByteBuffer;
@@ -185,5 +186,9 @@ public class BackgroundTextureData {
 
   public float[] getPrincipalPoint() {
     return principalPoint;
+  }
+
+  public Pose createAnchorFromTap(Camera camera, float[] screenUV){
+    return DepthImageUtils.getPoseInWorldSpaceFromScreenTap(camera, screenUV,depthImageSize,depthArray,focalLength,principalPoint);
   }
 }

@@ -1,6 +1,10 @@
 package com.kazuki.replaceobject_v2;
 
 import android.util.Log;
+import android.view.MotionEvent;
+
+import com.google.ar.core.Camera;
+import com.google.ar.core.Pose;
 
 import java.lang.reflect.Array;
 import java.util.ArrayList;
@@ -429,4 +433,150 @@ public class DepthImageUtils {
     for (int i = 0; i < result.length; i++) result[i] = list.get(i);
     return result;
   }
+
+  /********************************************************************/
+
+  public static Pose getPoseInWorldSpaceFromScreenTap(
+          Camera camera, float[] screenUV, int[] depthImageSize, short[] depthArray, float[] focalLength, float[] principalPoint){
+    float[] transform = getVertexInWorldSpaceFromScreenUV(camera, screenUV, depthImageSize, depthArray, focalLength, principalPoint);
+    float[] quaternion = getRotationQuaternionInWorldSpaceFromScreenUV(screenUV, camera,depthImageSize, depthArray,focalLength);
+    if (quaternion == null) {
+      return null;
+    }
+    Pose pose = new Pose(transform, quaternion);
+    return pose;
+  }
+
+  public static float[] getVertexInWorldSpaceFromScreenUV(
+          Camera camera,float[] screenUV, int[] depthImageSize, short[] depthArray, float[] focalLength, float[] principalPoint) {
+    int[] depthImageXY = screenToDepthXY(screenUV, depthImageSize);
+    float depth = getDepthFromXY(depthImageXY, depthImageSize, depthArray);
+    float[] vertex = computeVertex(depthImageXY[0], depthImageXY[1], depth,focalLength,principalPoint);
+    return transformVertexToWorldSpace(vertex, camera);
+  }
+
+  // Convert the screen UV coordinates to depth image XY coordinates
+  public static int[] screenToDepthXY(float[] screenUV, int[] depthImageSize) {
+    int[] depthXY = {
+            (int) (screenUV[0] * (depthImageSize[0] - 1)),
+            (int) (screenUV[1] * (depthImageSize[1] - 1))
+    };
+    return depthXY;
+  }
+
+  // Obtain the depth value in meters at the specified x,y location
+  public static float getDepthFromXY(int[] depthImageXY, int[] depthImageSize, short[] depthArray) {
+    int depthIndex = depthImageXY[1] * depthImageSize[0] + depthImageXY[0];
+    short depthInShort = depthArray[depthIndex];
+    float depthInMeter = depthInShort * 0.001f;
+    return depthInMeter;
+  }
+
+  // Reprojects a depth point to 3D vertex given the depth image XY and depth z
+  // return camera-space coordinate
+  // https://mem-archive.com/2018/02/21/post-157/
+  public static float[] computeVertex(int x, int y, float z, float[] focalLength, float[] principalPoint) {
+    float[] vertex = new float[3];
+
+    if (z > 0) {
+      float vertex_x = (x - principalPoint[0]) * z / focalLength[0];
+      float vertex_y = (y - principalPoint[1]) * z / focalLength[1];
+      vertex[0] = vertex_x;
+      vertex[1] = -vertex_y;
+      vertex[2] = -z;
+    }
+
+    return vertex;
+  }
+
+  // Transform a camera-space vertex into world space
+  public static float[] transformVertexToWorldSpace(float[] vertex, Camera camera) {
+    camera.getPose().transformPoint(vertex, 0, vertex, 0);
+    return vertex;
+  }
+
+  public static float[] getRotationQuaternionInWorldSpaceFromScreenUV(float[] screenUV, Camera camera, int[] depthImageSize, short[] depthArray, float[] focalLength) {
+    float[] cameraSpaceNormal = computeNormalVectorFromDepthWeightedMeanGradient(screenUV,depthImageSize, depthArray, focalLength);
+    if (cameraSpaceNormal == null) {
+      return null;
+    }
+    float[] worldSpaceNormal = camera.getPose().rotateVector(cameraSpaceNormal);
+
+    float[] quaternion = new float[4];
+    // cosθ = Dot((0,1,0),(x,y,z) / |(0,1,0)||(x,y,z)|
+    double theta = (float) Math.acos(worldSpaceNormal[1]);
+    // Cross((0,1,0),(x,y,z))
+    float[] rotateAxis = {worldSpaceNormal[2], 0, -worldSpaceNormal[0]};
+    VectorUtils.normalizeVector3f(rotateAxis);
+    quaternion[0] = rotateAxis[0] * (float) Math.sin(theta / 2);
+    quaternion[1] = rotateAxis[1] * (float) Math.sin(theta / 2);
+    quaternion[2] = rotateAxis[2] * (float) Math.sin(theta / 2);
+    quaternion[3] = (float) Math.cos(theta / 2);
+    return quaternion;
+  }
+
+  public static float[] computeNormalVectorFromDepthWeightedMeanGradient(float[] screenUV, int[] depthImageSize, short[] depthArray, float[] focalLength) {
+
+    // Get tap coordinate and depth.
+    int[] depthImageXY = screenToDepthXY(screenUV, depthImageSize);
+    float dp = getDepthFromXY(depthImageXY, depthImageSize, depthArray);
+    float outlierDistance = dp * 0.2f;
+
+    int radius=2;
+
+    // Determine whether the tap coordinate can calculate world-space pose.
+    if (depthImageXY[0] <= radius || depthImageSize[0] - radius < depthImageXY[0]
+            || depthImageXY[1] <= radius || depthImageSize[1] - radius < depthImageXY[1]) {
+      return null;
+    }
+
+    // Iterates over neighbors to compute normal vector.
+    int countX = 0;
+    int countY = 0;
+    float correlationX = 0;
+    float correlationY = 0;
+
+
+    for (int dy = -radius; dy <= radius; ++dy) {
+      for (int dx = -radius; dx <= radius; ++dx) {
+        // Self is not neigbor
+        if (dx == 0 && dy == 0) {
+          continue;
+        }
+
+        // Retrieves neighbor depth value
+        int[] neighborXY = {depthImageXY[0] + dx, depthImageXY[1] + dy};
+        float dq = getDepthFromXY(neighborXY, depthImageSize, depthArray);
+
+        // Confidence is not currently being packed yet, so for now this hardcoded.
+        float distance = dq - dp;
+        if (distance == 0 || Math.abs(distance) > outlierDistance) {
+          continue; // neighbor does not exist.
+        }
+
+        // Updates correlations in each dimension
+        if (dx != 0) {
+          countX += 1;
+          correlationX += distance / dx;
+        }
+        if (dy != 0) {
+          countY += 1;
+          correlationY += distance / dy;
+        }
+      }
+    }
+
+    // Computes estimate of normal vector by finding weighted averages of the surface gradient in XY.
+    // Note - convert camera-space coordinates from image-space coordinates.
+    float[] normalVector = new float[3];
+    float[] pixelSize = {dp / focalLength[0], dp / focalLength[1]};
+
+    normalVector[0] = correlationX / (pixelSize[0] * countX);
+    normalVector[1] = -correlationY / (pixelSize[1] * countY);
+    normalVector[2] = 1.0f;
+
+    VectorUtils.normalizeVector3f(normalVector);
+    return normalVector;
+  }
+
 }

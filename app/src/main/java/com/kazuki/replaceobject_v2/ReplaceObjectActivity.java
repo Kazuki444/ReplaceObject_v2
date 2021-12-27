@@ -31,6 +31,7 @@ import com.google.ar.core.ImageFormat;
 import com.google.ar.core.LightEstimate;
 import com.google.ar.core.Plane;
 import com.google.ar.core.Point;
+import com.google.ar.core.Pose;
 import com.google.ar.core.Session;
 import com.google.ar.core.Trackable;
 import com.google.ar.core.TrackingState;
@@ -143,6 +144,9 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
   // Background texture date.
   private BackgroundTextureData backgroundTextureData;
   private boolean isInitBackgroundTextureDate = false;
+
+  // screen size
+  private final int[] screenSize = new int[2];
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -322,6 +326,10 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
     displayRotationHelper.onSurfaceChanged(width, height);
     virtualSceneFramebuffer.resize(width, height);
     ml.isDisplayRotate();
+
+    // set screen size
+    screenSize[0] = width;
+    screenSize[1] = height;
   }
 
   @Override
@@ -512,37 +520,45 @@ public class ReplaceObjectActivity extends AppCompatActivity implements MyRender
     if (isShowDepthMap) return;
     MotionEvent tap = gestureHelper.poll();
     if (tap != null && camera.getTrackingState() == TrackingState.TRACKING) {
-      List<HitResult> hitResultList;
-      hitResultList = frame.hitTest(tap);
-      for (HitResult hit : hitResultList) {
-        // If any plane, Oriented Point, or Instant Placement Point was hit, create an anchor.
-        Trackable trackable = hit.getTrackable();
-        // If a plane was hit, check that it was hit inside the plane polygon.
-        // DepthPoints are only returned if Config.DepthMode is set to AUTOMATIC.
-        if ((trackable instanceof Plane
-                && ((Plane) trackable).isPoseInPolygon(hit.getHitPose()))
-                || (trackable instanceof Point
-                && ((Point) trackable).getOrientationMode()
-                == Point.OrientationMode.ESTIMATED_SURFACE_NORMAL)
-                || (trackable instanceof DepthPoint)) {
-          // Cap the number of objects created. This avoids overloading both the
-          // rendering system and ARCore.
-          if (anchors.size() >= 1) {
-            anchors.get(0).detach();
-            anchors.remove(0);
-          }
-
-          // Adding an Anchor tells ARCore that it should track this position in
-          // space. This anchor is created on the Plane to place the 3D model
-          // in the correct position relative both to the world and to the plane.
-          anchors.add(hit.createAnchor());
-
-          // Hits are sorted by depth. Consider only closest hit on a plane, Oriented Point, or
-          // Instant Placement Point.
-          break;
-        }
+      // Cap the number of objects created. This avoids overloading both the rendering system and ARCore.
+      if (anchors.size() >= 1) {
+        anchors.get(0).detach();
+        anchors.remove(0);
       }
+
+      float[] screenUV = calcScreenUV(tap);
+      Pose pose = backgroundTextureData.createAnchorFromTap(camera, screenUV);
+      if (pose == null) return;
+      anchors.add(session.createAnchor(pose));
+
+      /***************/
+
     }
+  }
+
+  private float[] calcScreenUV(MotionEvent tap) {
+    int cameraSensorToDisplayRotation =
+            displayRotationHelper.getCameraSensorToDisplayRotation(session.getCameraConfig().getCameraId());
+    float[] screenUV = new float[2];
+    switch (cameraSensorToDisplayRotation) {
+      case 0:
+        screenUV[0] = tap.getX() / screenSize[0];
+        screenUV[1] = tap.getY() / screenSize[1];
+        break;
+      case 90:
+        screenUV[0] = tap.getY() / screenSize[1];
+        screenUV[1] = (screenSize[0] - tap.getX()) / screenSize[0];
+        break;
+      case 180:
+        screenUV[0] = (screenSize[0] - tap.getX()) / screenSize[0];
+        screenUV[1] = (screenSize[1] - tap.getY()) / screenSize[1];
+        break;
+      case 270:
+        screenUV[0] = (screenSize[1] - tap.getY()) / screenSize[1];
+        screenUV[1] = tap.getX() / screenSize[0];
+        break;
+    }
+    return screenUV;
   }
 
   /**
